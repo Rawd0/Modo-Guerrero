@@ -13,6 +13,9 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
   monotonía y tensión semanal.
 - **0.6.0** Copias de seguridad: automáticas a diario con retención, manuales, descarga y
   restauración segura (con copia previa automática). App en la pantalla de inicio (PWA básica).
+- **0.6.1** Nuevo icono (G con pulso y laurel) y cabecera MODO / GUERRERO.
+- **0.7.0** Objetivos de carrera: predicción según tu forma (VDOT de Daniels, Riegel y Garmin),
+  proyección de la forma con afinamiento hasta el día, lista de preparación y resultado automático.
 
 ## Más adelante
 
@@ -26,11 +29,11 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
   con la contraseña como respaldo.
 - **Zonas e historial del atleta** (Elevate): FC máxima, de reposo y umbral con fecha, para que las
   carreras antiguas se analicen con los valores que tenías entonces.
-- **Predicción de carrera según tu forma** (Runalyze), comparada con la de Garmin.
 - **Strava** como fuente complementaria (segmentos, kudos) o alternativa a Garmin.
 - **Inicio con cuadrícula libre:** widgets redimensionables y nuevos widgets (objetivos, calendario
   del mes, sueño frente a rendimiento).
 - **Comparar dos periodos** lado a lado (intervals.icu).
 - **Rutas repetidas** detectadas automáticamente y tu evolución en ellas (intervals.icu).
 - **Preguntas en lenguaje natural** sobre tus datos usando un modelo local (Ollama).
-- **Objetivos y preparación de carreras:** fecha de la carrera, plan y seguimiento.
+- **Plan de entrenamiento** para un objetivo: semanas, sesiones y seguimiento de lo hecho frente a lo
+  previsto.

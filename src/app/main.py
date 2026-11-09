@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, backup, db, garmin_auth, metrics, shoes, stats, sync
+from . import auth, backup, db, garmin_auth, metrics, races, shoes, stats, sync
 from .config import APP_NAME, DEFAULT_SETTINGS, VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -440,6 +440,47 @@ def get_progression(request: Request, metric: str = "distance"):
 @app.get("/api/pace-curve")
 def get_pace_curve(request: Request, days: int = 90):
     return stats.pace_curve(_uid(request), min(max(days, 7), 3650))
+
+
+# ---------- objetivos de carrera ----------
+def _race_call(fn, *a):
+    try:
+        return fn(*a)
+    except races.RaceError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/races")
+def list_races(request: Request):
+    return races.list_races(_uid(request))
+
+
+@app.post("/api/races")
+def create_race(request: Request, payload: dict = Body(...)):
+    return {"ok": True, "id": _race_call(races.create, _uid(request), payload)}
+
+
+@app.get("/api/races/{race_id}")
+def race_detail(request: Request, race_id: int):
+    return _race_call(races.detail, _uid(request), race_id)
+
+
+@app.put("/api/races/{race_id}")
+def update_race(request: Request, race_id: int, payload: dict = Body(...)):
+    _race_call(races.update, _uid(request), race_id, payload)
+    return {"ok": True}
+
+
+@app.put("/api/races/{race_id}/result")
+def set_race_result(request: Request, race_id: int, payload: dict = Body(...)):
+    _race_call(races.set_result, _uid(request), race_id, payload.get("activity_id"))
+    return {"ok": True}
+
+
+@app.delete("/api/races/{race_id}")
+def delete_race(request: Request, race_id: int):
+    _race_call(races.delete, _uid(request), race_id)
+    return {"ok": True}
 
 
 # ---------- zapatillas ----------

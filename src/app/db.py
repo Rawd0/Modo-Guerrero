@@ -15,7 +15,7 @@ from .config import DB_PATH, DEFAULT_SETTINGS
 
 log = logging.getLogger("guerrero.db")
 _lock = threading.RLock()
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -94,6 +94,20 @@ CREATE TABLE IF NOT EXISTS shoes (
     created TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_shoes_user ON shoes(user_id);
+CREATE TABLE IF NOT EXISTS races (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    date TEXT NOT NULL,
+    distance_m REAL NOT NULL,
+    goal_time_s REAL,
+    priority TEXT DEFAULT 'A',
+    notes TEXT,
+    result_activity_id INTEGER,
+    result_manual INTEGER DEFAULT 0,
+    created TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_races_user ON races(user_id, date);
 CREATE TABLE IF NOT EXISTS daily_health (
     user_id INTEGER NOT NULL DEFAULT 0,
     date TEXT NOT NULL,
@@ -142,7 +156,7 @@ CREATE INDEX IF NOT EXISTS ix_sync_user ON sync_log(user_id, id);
 """
 
 # tablas con datos de cada usuario (best_efforts y streams cuelgan de activities)
-USER_TABLES = ("activities", "daily_health", "snapshots", "sync_log", "user_settings", "shoes")
+USER_TABLES = ("activities", "daily_health", "snapshots", "sync_log", "user_settings", "shoes", "races")
 
 
 def connect():
@@ -233,7 +247,7 @@ def claim_unassigned(user_id: int):
             + con.execute("SELECT COUNT(*) FROM user_settings WHERE user_id=0").fetchone()[0]
         if not n:
             return
-        for t in ("activities", "daily_health", "snapshots", "sync_log", "shoes"):
+        for t in ("activities", "daily_health", "snapshots", "sync_log", "shoes", "races"):
             con.execute(f"UPDATE OR IGNORE {t} SET user_id=? WHERE user_id=0", (user_id,))
         con.execute("INSERT OR IGNORE INTO user_settings (user_id, key, value) "
                     "SELECT ?, key, value FROM user_settings WHERE user_id=0", (user_id,))

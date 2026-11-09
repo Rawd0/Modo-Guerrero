@@ -241,7 +241,7 @@ async function rerender() {
   const key = name || "home";
   current = key;
   disposeAll();
-  $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === (key === "carrera" ? "carreras" : key)));
+  $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === ({ carrera: "carreras", objetivo: "objetivos" }[key] || key)));
   const view = $("#view");
   view.innerHTML = `<div class="skeleton"></div>`;
   try {
@@ -266,6 +266,7 @@ const WIDGETS = {
   weeks_chart: { title: "Kilómetros por semana", render: wWeeksChart },
   year_progress: { title: "Progresión del año", render: wYearProgress },
   shoes: { title: "Zapatillas", render: wShoes },
+  next_race: { title: "Próxima carrera", render: wNextRace },
 };
 
 route("home", async (view) => {
@@ -503,6 +504,26 @@ function wYearProgress(card, d) {
     const same = P.years.map((y) => ({ year: y.year, value: y.series[Math.min(P.today_doy, y.series.length) - 1] || 0 }));
     progressionChart($("#cYp", card), { metric: "distance", years: P.years, same_date: same }, $("#ypInfo", card), true);
   };
+}
+
+function wNextRace(card, d) {
+  const r = d.next_race;
+  if (!r) {
+    card.innerHTML = `<h3>Próxima carrera</h3><div class="muted">Añade tu próxima carrera para ver la cuenta atrás, tu predicción y si llegarás en forma.</div><a class="more" href="#/objetivos">Añadir carrera →</a>`;
+    return;
+  }
+  const p = r.prediction || {}, [lo, hi] = r.tsb_window || [5, 15];
+  const tsbOk = r.race_tsb != null && r.race_tsb >= lo && r.race_tsb <= hi;
+  card.innerHTML = `<h3>Próxima carrera <span class="tag ${r.priority === "A" ? "accent" : ""}">Prioridad ${r.priority}</span></h3>
+    <a href="#/objetivo/${r.id}"><div class="mid">${esc(r.name)}</div></a>
+    <div class="muted" style="font-size:13px">${fdate(r.date)} · ${raceDist(r)}</div>
+    <div class="row" style="align-items:baseline;margin-top:10px"><span class="big num">${r.days_left}</span><span class="muted">${r.days_left === 1 ? "día" : "días"}</span></div>
+    <div class="kpis">
+      <div class="kpi"><div class="v num">${r.goal_time_s ? dur(r.goal_time_s) : "–"}</div><div class="l">Objetivo</div></div>
+      <div class="kpi"><div class="v num">${p.estimate ? dur(p.estimate) : "–"}</div><div class="l">Predicción hoy</div></div>
+      <div class="kpi"><div class="v num">${r.race_tsb != null ? tsbFmt(r.race_tsb) : "–"}</div><div class="l">Forma prevista <span class="tag ${tsbOk ? "good" : "warn"}" style="font-size:10px;padding:1px 5px">${tsbOk ? "en rango" : "fuera de rango"}</span></div></div>
+    </div>
+    <a class="more" href="#/objetivo/${r.id}">Ver preparación →</a>`;
 }
 
 function wShoes(card, d) {
@@ -972,6 +993,154 @@ route("stats", async (view) => {
     series: [{ type: "bar", data: order.map((k) => hist[k] || 0), itemStyle: { color: t.violet + "cc", borderRadius: [4, 4, 0, 0] } }],
   });
 });
+
+// ================================================================ OBJETIVOS DE CARRERA
+const RACE_DISTS = [[5000, "5 km"], [10000, "10 km"], [15000, "15 km"], [21097.5, "Media maratón"], [42195, "Maratón"]];
+const PRIO = { A: "Objetivo principal: llegar en tu mejor forma", B: "Importante, con un afinamiento corto", C: "De preparación, sin bajar la carga" };
+// TSB con signo y sin «-0»
+function tsbFmt(v) { const n = Math.round(v); return n > 0 ? `+${n}` : String(n === 0 ? 0 : n); }
+function raceDist(r) { return r.label || `${nf1.format(r.distance_m / 1000)} km`; }
+function parseTime(str) {
+  const parts = String(str || "").trim().split(":").map(Number);
+  if (!parts.length || parts.some((x) => isNaN(x))) return null;
+  return parts.reduce((acc, v) => acc * 60 + v, 0) || null;
+}
+const verdictTag = (v) => !v ? "" : v.label === "ambicioso" ? `<span class="tag warn">Ambicioso (${v.diff_pct}%)</span>`
+  : v.label === "realista" ? `<span class="tag good">Realista</span>` : `<span class="tag blue">Conservador (+${v.diff_pct}%)</span>`;
+
+route("objetivos", async (view) => {
+  const L = await api("/api/races");
+  const card = (r) => {
+    const p = r.prediction || {};
+    return `<a class="card" href="#/objetivo/${r.id}" style="display:block">
+      <h3>${fdate(r.date)} <span class="tag ${r.priority === "A" ? "accent" : ""}">${r.priority}</span></h3>
+      <div class="mid">${esc(r.name)}</div><div class="muted" style="font-size:13px">${raceDist(r)}${r.goal_time_s ? ` · objetivo ${dur(r.goal_time_s)} (${pace(r.goal_pace)} /km)` : ""}</div>
+      ${r.days_left >= 0
+        ? `<div class="row" style="justify-content:space-between;margin-top:10px"><span><span class="big num" style="font-size:30px">${r.days_left}</span> <span class="muted">días</span></span>
+             <span style="text-align:right"><span class="muted" style="font-size:12px">Predicción hoy</span><br><b class="num">${p.estimate ? dur(p.estimate) : "–"}</b></span></div>`
+        : r.result && r.result.time_s ? `<div class="row" style="justify-content:space-between;margin-top:10px"><span class="big num" style="font-size:30px">${dur(r.result.time_s)}</span>
+             ${r.result.vs_goal_s != null ? `<span class="tag ${r.result.vs_goal_s <= 0 ? "good" : "warn"}">${r.result.vs_goal_s <= 0 ? "Objetivo cumplido" : "+" + dur(r.result.vs_goal_s) + " sobre el objetivo"}</span>` : ""}</div>`
+        : `<div class="muted" style="margin-top:10px;font-size:13px">Sin resultado enlazado</div>`}
+    </a>`;
+  };
+  view.innerHTML = `
+    <div class="page-head"><div><h1>Objetivos</h1><div class="sub">Tus carreras objetivo: predicción, preparación y forma prevista para el día</div></div>
+      <button class="btn primary" id="addRace">Añadir carrera</button></div>
+    <div class="card" id="raceForm" hidden style="margin-bottom:16px">${raceFormHtml()}</div>
+    ${L.upcoming.length ? `<div class="grid">${L.upcoming.map(card).join("")}</div>` : `<div class="card empty"><h2>Sin carreras a la vista</h2><p>Añade la próxima carrera que quieras preparar: verás la cuenta atrás, una predicción de tu tiempo según tu forma, cómo llegarás de fresco y qué te falta en la preparación.</p></div>`}
+    ${L.past.length ? `<div class="section-title">Carreras pasadas</div><div class="grid">${L.past.map(card).join("")}</div>` : ""}`;
+  $("#addRace").onclick = () => { const f = $("#raceForm"); f.hidden = !f.hidden; if (!f.hidden) $("#rfName").focus(); };
+  setupRaceForm(null, (id) => { location.hash = `#/objetivo/${id}`; });
+});
+
+function raceFormHtml(r) {
+  const preset = r ? RACE_DISTS.find(([d]) => Math.abs(d - r.distance_m) < 1) : RACE_DISTS[3];
+  return `<h3>${r ? "Editar carrera" : "Nueva carrera"}</h3>
+    <form id="rf" class="form-grid">
+      <label class="field">Nombre<input type="text" id="rfName" required maxlength="80" placeholder="Maratón de Valencia" value="${esc(r ? r.name : "")}"></label>
+      <label class="field">Fecha<input type="date" id="rfDate" required value="${esc(r ? r.date : "")}"></label>
+      <label class="field">Distancia<select id="rfDist">${RACE_DISTS.map(([d, l]) => `<option value="${d}" ${preset && preset[0] === d ? "selected" : ""}>${l}</option>`).join("")}<option value="custom" ${r && !preset ? "selected" : ""}>Otra…</option></select></label>
+      <label class="field" id="rfCustomWrap" ${r && !preset ? "" : "hidden"}>Km<input type="number" id="rfCustom" min="1" max="250" step="0.1" value="${r && !preset ? r.distance_m / 1000 : ""}"></label>
+      <label class="field">Tiempo objetivo<input type="text" id="rfGoal" placeholder="h:mm:ss (opcional)" inputmode="numeric" value="${r && r.goal_time_s ? dur(r.goal_time_s) : ""}"></label>
+      <label class="field">Prioridad<select id="rfPrio">${Object.entries(PRIO).map(([k, l]) => `<option value="${k}" ${(r ? r.priority : "A") === k ? "selected" : ""}>${k} · ${l}</option>`).join("")}</select></label>
+      <label class="field" style="grid-column:1/-1">Notas<input type="text" id="rfNotes" maxlength="500" value="${esc(r && r.notes ? r.notes : "")}" placeholder="Circuito, desnivel, estrategia…"></label>
+      <div class="row"><button class="btn primary">Guardar</button>${r ? `<button type="button" class="btn ghost" id="rfDelete" style="color:var(--bad)">Eliminar</button>` : ""}</div>
+    </form><div id="rfMsg"></div>`;
+}
+
+function setupRaceForm(r, done) {
+  $("#rfDist").onchange = (e) => { $("#rfCustomWrap").hidden = e.target.value !== "custom"; };
+  $("#rf").onsubmit = async (e) => {
+    e.preventDefault();
+    const dv = $("#rfDist").value;
+    const goalStr = $("#rfGoal").value.trim();
+    const goal = goalStr ? parseTime(goalStr) : null;
+    if (goalStr && !goal) { $("#rfMsg").innerHTML = `<p class="tag bad">Escribe el tiempo como h:mm:ss, por ejemplo 1:45:00</p>`; return; }
+    const body = { name: $("#rfName").value, date: $("#rfDate").value, priority: $("#rfPrio").value, notes: $("#rfNotes").value,
+      distance_m: dv === "custom" ? +$("#rfCustom").value * 1000 : +dv, goal_time_s: goal };
+    try {
+      if (r) { await api(`/api/races/${r.id}`, { method: "PUT", body }); done(r.id); }
+      else { const res = await api("/api/races", { method: "POST", body }); done(res.id); }
+      toast("Carrera guardada");
+    } catch (err) { $("#rfMsg").innerHTML = `<p class="tag bad" style="white-space:normal">${esc(err.message)}</p>`; }
+  };
+  const del = $("#rfDelete");
+  if (del) del.onclick = async () => {
+    if (!confirm(`¿Eliminar «${r.name}»?`)) return;
+    await api(`/api/races/${r.id}`, { method: "DELETE" }); location.hash = "#/objetivos";
+  };
+}
+
+route("objetivo", async (view, id) => {
+  const r = await api(`/api/races/${id}`);
+  const p = r.prediction || {};
+  const upcoming = r.days_left >= 0;
+  const predRow = (label, t, extra = "") => `<div class="rec-row"><span>${label}${extra}</span><span class="faint num" style="font-size:12px">${t ? pace(t / (r.distance_m / 1000)) + " /km" : ""}</span><span class="t num">${t ? dur(t) : "–"}</span></div>`;
+  const ck = r.checklist;
+  view.innerHTML = `
+    <div class="page-head"><div><a class="muted" href="#/objetivos">← Objetivos</a><h1>${esc(r.name)}</h1>
+      <div class="sub">${fdate(r.date)} · ${raceDist(r)} · <span class="tag ${r.priority === "A" ? "accent" : ""}">Prioridad ${r.priority}</span>${r.notes ? ` · ${esc(r.notes)}` : ""}</div></div>
+      <button class="btn" id="editRace">Editar</button></div>
+    <div class="card" id="raceForm" hidden style="margin-bottom:16px">${raceFormHtml(r)}</div>
+    <div class="grid">
+      ${upcoming ? `<div class="card"><h3>Cuenta atrás</h3><div class="big num">${r.days_left}<small>${r.days_left === 1 ? "día" : "días"}</small></div>
+        <div class="muted">${r.goal_time_s ? `Objetivo <b>${dur(r.goal_time_s)}</b> · ${pace(r.goal_pace)} /km` : "Sin tiempo objetivo"}</div>
+        ${ck && ck.verdict ? `<div style="margin-top:10px">${verdictTag(ck.verdict)}</div><div class="faint" style="font-size:12px;margin-top:6px">Comparado con tu predicción actual (${dur(p.estimate)}).</div>` : ""}</div>`
+      : `<div class="card"><h3>Resultado</h3>${r.result && r.result.time_s ? `<a href="#/carrera/${r.result.activity.id}"><div class="big num">${dur(r.result.time_s)}</div></a>
+          <div class="muted">${pace(r.result.time_s / (r.distance_m / 1000))} /km${r.goal_time_s ? ` · objetivo ${dur(r.goal_time_s)}` : ""}</div>
+          ${r.result.vs_goal_s != null ? `<div style="margin-top:10px"><span class="tag ${r.result.vs_goal_s <= 0 ? "good" : "warn"}">${r.result.vs_goal_s <= 0 ? "Objetivo cumplido por " + dur(-r.result.vs_goal_s) : dur(r.result.vs_goal_s) + " sobre el objetivo"}</span></div>` : ""}`
+        : `<div class="muted">No se ha encontrado la actividad de la carrera.</div>`}
+        ${r.candidates.length ? `<label class="field" style="margin-top:12px">Actividad de la carrera<select id="resSel"><option value="">Ninguna</option>${r.candidates.map((c) => `<option value="${c.id}" ${r.result && r.result.activity.id === c.id ? "selected" : ""}>${esc(c.name)} · ${km(c.distance_m)} km</option>`).join("")}</select></label>` : ""}</div>`}
+      <div class="card"><h3>${upcoming ? "Predicción con tu forma actual" : "Predicción que tenías antes de la carrera"}</h3>
+        <div class="rec-list">
+          ${predRow("VDOT (Daniels)", p.vdot, p.vdot_value ? ` <span class="faint" style="font-size:12px">· VDOT ${nf1.format(p.vdot_value)}</span>` : "")}
+          ${predRow("Riegel", p.riegel, p.riegel_from ? ` <span class="faint" style="font-size:12px">· desde ${labelFor(p.riegel_from.distance_m)}</span>` : "")}
+          ${upcoming ? predRow("Garmin", p.garmin) : ""}
+          <div class="rec-row" style="border-top:1px solid var(--line)"><b>Estimación</b><span class="faint num" style="font-size:12px">${p.estimate ? pace(p.estimate / (r.distance_m / 1000)) + " /km" : ""}</span><span class="t num" style="color:var(--accent)">${p.estimate ? dur(p.estimate) : "–"}</span></div>
+        </div>
+        <p class="faint" style="font-size:12px;margin:8px 0 0">${p.based_on ? `Basada en tus mejores tramos de los últimos 90 días (el de más valor: ${labelFor(p.based_on.distance_m)} en ${dur(p.based_on.time_s)}). Si en entrenamiento no has ido a tope, la predicción es conservadora.` : "Aún no hay tramos recientes suficientes para predecir."}</p></div>
+      ${ck ? `<div class="card"><h3>Preparación</h3><div class="rec-list">${ck.items.map((i) => `<div class="rec-row" style="grid-template-columns:auto 1fr auto">
+          <span style="font-size:18px">${i.ok ? "✅" : "⚠️"}</span><span>${i.label}<br><span class="faint" style="font-size:12px">recomendado ${typeof i.target === "number" ? (i.id === "freq" ? "≥ " : "≥ ") + i.target + (i.unit ? " " + i.unit : "") : i.target}</span></span>
+          <span class="t num">${i.id === "tsb" && i.value > 0 ? "+" : ""}${typeof i.value === "number" ? nf1.format(i.value).replace(",0", "") : i.value}${i.unit ? " " + i.unit : ""}</span></div>`).join("")}</div>
+        <p class="faint" style="font-size:12px;margin:8px 0 0">Orientaciones generales para un corredor popular; adáptalas a tu plan y a tu experiencia.</p></div>` : ""}
+      ${upcoming && r.projection ? `<div class="card wide" style="grid-column:1/-1"><h3>Forma prevista hasta el día de la carrera</h3>
+        <div class="muted" style="font-size:13px;margin-top:-6px">Suponiendo que mantienes tu carga media de las últimas 4 semanas${r.priority !== "C" ? ` y la reduces al 60 % los últimos ${r.projection.taper_days} días (afinamiento)` : ""}.
+          Forma (TSB) el día de la carrera: <b>${tsbFmt(r.projection.race_tsb)}</b>${r.projection_no_taper ? ` · sin afinamiento: ${tsbFmt(r.projection_no_taper.race_tsb)}` : ""}.
+          Rango ideal para prioridad ${r.priority}: ${ck.tsb_window[0] > 0 ? "+" : ""}${ck.tsb_window[0]} a +${ck.tsb_window[1]}.</div>
+        <div class="chart xl" id="projChart"></div></div>` : ""}
+    </div>`;
+  $("#editRace").onclick = () => { const f = $("#raceForm"); f.hidden = !f.hidden; };
+  setupRaceForm(r, () => rerender());
+  const rs = $("#resSel");
+  if (rs) rs.onchange = async (e) => { await api(`/api/races/${r.id}/result`, { method: "PUT", body: { activity_id: e.target.value || null } }); rerender(); };
+  if (upcoming && r.projection) projectionChart($("#projChart"), r);
+});
+
+function projectionChart(el, r) {
+  const t = theme();
+  const hist = r.history || [], proj = r.projection.series, noTaper = r.projection_no_taper ? r.projection_no_taper.series : null;
+  const dates = hist.map((x) => x.date).concat(proj.map((x) => x.date));
+  const pad = (arr, before) => Array(before).fill(null).concat(arr);
+  const [lo, hi] = r.checklist.tsb_window;
+  const taperStart = proj.length - r.projection.taper_days - 1;
+  return chart(el, {
+    legend: { top: 0, textStyle: { color: t.text }, icon: "roundRect" }, grid: { top: 34, bottom: 30 },
+    xAxis: { type: "category", data: dates, boundaryGap: false, axisLabel: { formatter: (v) => fdateShort(v) } },
+    yAxis: { type: "value" },
+    tooltip: { formatter: (ps) => `${fdate(ps[0].axisValue)}<br>` + ps.filter((p) => p.value != null).map((p) => `${p.marker}${p.seriesName}: <b>${nf0.format(p.value)}</b>`).join("<br>") },
+    series: [
+      { name: "Fitness (CTL)", type: "line", data: hist.map((x) => x.ctl).concat(Array(proj.length).fill(null)), symbol: "none", lineStyle: { color: t.blue, width: 2.5 }, itemStyle: { color: t.blue } },
+      { name: "Fitness previsto", type: "line", data: pad(proj.map((x) => x.ctl), hist.length), symbol: "none", lineStyle: { color: t.blue, width: 2, type: "dashed" }, itemStyle: { color: t.blue } },
+      { name: "Forma (TSB)", type: "line", data: hist.map((x) => x.tsb).concat(Array(proj.length).fill(null)), symbol: "none", lineStyle: { color: t.good, width: 2.5 }, itemStyle: { color: t.good } },
+      { name: "Forma prevista", type: "line", data: pad(proj.map((x) => x.tsb), hist.length), symbol: "none", lineStyle: { color: t.good, width: 2, type: "dashed" }, itemStyle: { color: t.good },
+        markArea: { silent: true, itemStyle: { color: t.good + "18" }, data: [[{ yAxis: lo }, { yAxis: hi }]] },
+        markLine: { symbol: "none", silent: true, lineStyle: { color: t.accent }, label: { color: t.text, formatter: "carrera", position: "insideEndTop" }, data: [{ xAxis: dates.length - 1 }] } },
+      ...(noTaper ? [{ name: "Forma sin afinar", type: "line", data: pad(noTaper.map((x) => x.tsb), hist.length), symbol: "none", lineStyle: { color: t.faint, width: 1.4, type: "dotted" }, itemStyle: { color: t.faint } }] : []),
+      ...(r.priority !== "C" && taperStart > 0 ? [{ name: "Afinamiento", type: "line", data: [], markArea: { silent: true, itemStyle: { color: t.accent + "12" }, label: { color: t.text, formatter: "afinamiento", position: "insideTop" },
+        data: [[{ xAxis: hist.length + taperStart }, { xAxis: dates.length - 1 }]] } }] : []),
+    ],
+  });
+}
 
 // ================================================================ ZAPATILLAS
 route("zapatillas", async (view) => {
