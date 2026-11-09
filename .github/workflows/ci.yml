@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths: ["src/**", ".github/workflows/ci.yml"]
   pull_request:
+  workflow_call:
 
 jobs:
   test:
@@ -41,7 +42,7 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/home)" = "401" || { echo "La API no exige sesión"; exit 1; }
           # crear la cuenta inicial y usar su cookie
           curl -fs -c jar -H "$H" -H "Content-Type: application/json" \
-            -d '{"username":"ci","password":"contrasena-de-prueba","remember":true}' localhost:8080/api/auth/setup
+            -d '{"username":"ci-test","password":"contrasena-de-prueba","remember":true}' localhost:8080/api/auth/setup
           for p in status home activities records "stats?group=week" health fitness settings account/sessions; do
             curl -fs -b jar -o /dev/null "localhost:8080/api/$p" || { echo "Falla /api/$p"; exit 1; }
           done
