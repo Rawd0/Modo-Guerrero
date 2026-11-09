@@ -1,5 +1,4 @@
-Ajustes en el iPhone y en la sincronización.
+Cabecera en iPhone y salud a 7 días.
 
-- App en la pantalla de inicio del iPhone: más margen en la cabecera para que la fila de secciones no se vea cortada, y sin ampliación automática del texto.
-- Ajustes › Sincronización explica mejor el estado: cuántas actividades son de carrera y cuántas de otros deportes (se guardan pero no se analizan), de cuántas carreras se ha descargado el detalle, cuántas quedan y si está todo al día.
-- Si Garmin no devolvió el detalle de alguna carrera, se indica y puedes reintentarlo con un botón.
+- App en la pantalla de inicio del iPhone: la cabecera baja lo suficiente para que el logo y el estado de sincronización queden fuera del difuminado que iOS pone bajo la barra de estado.
+- Salud: nueva escala de 7 días (y «6 meses» y «1 año» en lugar de 180 y 365 días). Con pocos días se marcan los puntos y el eje muestra el día de la semana.
