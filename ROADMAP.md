@@ -12,18 +12,18 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
   acumulada, ritmo ajustado a la pendiente (GAP), kilometraje de zapatillas, curva de ritmo, y
   monotonía y tensión semanal.
 - **0.6.0** Copias de seguridad: automáticas a diario con retención, manuales, descarga y
-  restauración segura (con copia previa automática).
+  restauración segura (con copia previa automática). App en la pantalla de inicio (PWA básica).
 
 ## Más adelante
 
 - **Copia fuera del servidor**: enviar automáticamente cada copia a otro sitio (por ejemplo una
   carpeta de Nextcloud sincronizada con tu ordenador) para protegerte de un fallo del disco.
-- **App en la pantalla de inicio del iPhone (PWA)**: icono propio y pantalla completa.
+- **HTTPS con Tailscale**, que desbloquea **Face ID con passkeys**, **notificaciones push** en el
+  móvil (zapatillas, sesión de Garmin caducada, resumen semanal) y el modo sin conexión de la app.
 - **Importar las zapatillas de Garmin Connect** (el «equipo» que ya tengas dado de alta allí) y su
   asignación a cada actividad.
-- **Face ID con passkeys**: iniciar sesión con Face ID / huella mediante WebAuthn. Requiere entrar
-  por HTTPS con un nombre de dominio (certificados HTTPS de Tailscale:
-  `https://<servidor>.<red>.ts.net`). La contraseña quedaría como respaldo.
+- **Face ID con passkeys** (requiere HTTPS): iniciar sesión con Face ID / huella mediante WebAuthn,
+  con la contraseña como respaldo.
 - **Zonas e historial del atleta** (Elevate): FC máxima, de reposo y umbral con fecha, para que las
   carreras antiguas se analicen con los valores que tenías entonces.
 - **Predicción de carrera según tu forma** (Runalyze), comparada con la de Garmin.

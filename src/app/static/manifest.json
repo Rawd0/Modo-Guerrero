@@ -1,0 +1,17 @@
+{
+  "name": "Modo Guerrero",
+  "short_name": "Modo Guerrero",
+  "description": "Tus carreras y tu salud de Garmin, en tu propio servidor.",
+  "lang": "es",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1216",
+  "theme_color": "#0f1216",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/static/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

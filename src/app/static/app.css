@@ -265,3 +265,28 @@ label.check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--card); outline: 2px solid transparent; cursor: pointer; padding: 0; }
 .swatch.on { outline-color: var(--text); }
 .swatch:focus-visible { outline-color: var(--accent); }
+
+/* ---------- app en la pantalla de inicio (iPhone con notch / isla) ----------
+   La barra de estado es translúcida con texto blanco: pintamos debajo una franja oscura en los temas
+   oscuros y del color principal en el claro, para que la hora y la batería se lean siempre. */
+:root { --status-bg: var(--bg); --sat: env(safe-area-inset-top, 0px); }
+:root[data-theme="light"] { --status-bg: var(--accent); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]):not([data-theme="black"]) { --status-bg: var(--accent); } }
+body::before {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; height: var(--sat);
+  background: var(--status-bg); z-index: 1001; pointer-events: none;
+}
+.topbar { top: var(--sat); padding-left: max(24px, env(safe-area-inset-left)); padding-right: max(24px, env(safe-area-inset-right)); }
+body { padding-top: var(--sat); padding-bottom: env(safe-area-inset-bottom); }
+.toast { bottom: calc(22px + env(safe-area-inset-bottom)); }
+@media (max-width: 760px) {
+  .topbar { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+  main { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+}
+/* como app instalada: sin rebote del fondo ni resaltado gris al tocar */
+@media (display-mode: standalone) {
+  html, body { overscroll-behavior-y: none; }
+  a, button { -webkit-tap-highlight-color: transparent; }
+  .standalone-only { display: inline-flex !important; }
+}
+.standalone-only { display: none !important; }

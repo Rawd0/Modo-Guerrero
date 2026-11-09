@@ -1061,6 +1061,17 @@ route("ajustes", async (view) => {
       <div class="card"><h3>Cuenta de Garmin ${st.connected ? `<span class="tag good">Conectada</span>` : `<span class="tag bad">Sin conectar</span>`}</h3>
         <div id="garminBox"></div>
       </div>
+      <div class="card"><h3>App en el móvil ${IS_STANDALONE ? `<span class="tag good">Instalada</span>` : ""}</h3>
+        ${IS_STANDALONE ? `<p class="muted" style="font-size:14px;margin-top:0">Estás usando Modo Guerrero como app. Al volver a ella tras un rato, los datos se actualizan solos.</p>`
+        : IS_IOS ? `<ol class="muted" style="font-size:14px;margin:0;padding-left:20px;line-height:1.7">
+            <li>Abre esta página en <b>Safari</b>.</li>
+            <li>Pulsa <b>Compartir</b> (el cuadrado con la flecha hacia arriba).</li>
+            <li>Elige <b>Añadir a pantalla de inicio</b> y pulsa <b>Añadir</b>.</li>
+            <li>Ábrela desde el icono e inicia sesión marcando «Recordar este dispositivo».</li></ol>`
+        : `<p class="muted" style="font-size:14px;margin-top:0">En el móvil, abre esta página y usa <b>Añadir a pantalla de inicio</b> (en Safari, desde Compartir; en Chrome, desde el menú ⋮). Tendrás un icono propio y se abrirá a pantalla completa.</p>`}
+        <p class="faint" style="font-size:12px;margin-bottom:0">Consejo: añádela usando la dirección de Tailscale de tu servidor (no <code>umbrel.local</code>), así funcionará también fuera de casa con Tailscale activo en el móvil.
+          Dirección actual: <code>${esc(location.origin)}</code></p>
+      </div>
       <div class="card"><h3>Apariencia</h3>
         <label class="field">Tema</label>
         <div class="seg" id="themeSeg" style="margin-top:6px">${THEMES.map(([k, l]) => `<button data-theme="${k}" class="${(set.theme || "auto") === k ? "on" : ""}">${l}</button>`).join("")}</div>
@@ -1473,6 +1484,17 @@ async function logout() {
   AUTHED = false; ME = null;
   showAuth(false);
 }
+
+// ---------------------------------------------------------------- app instalada
+const IS_STANDALONE = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+const IS_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+// Instalada no hay «tirar para recargar»: al volver a la app tras un rato, refrescar los datos
+let hiddenAt = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (AUTHED && hiddenAt && Date.now() - hiddenAt > 5 * 60 * 1000) { rerender(); }
+  hiddenAt = 0;
+});
 
 // ---------------------------------------------------------------- arranque
 (async () => {

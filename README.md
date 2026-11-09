@@ -25,6 +25,12 @@ temporal. Cada persona elige la suya al entrar por primera vez, conecta su propi
 tiene sus propios datos y ajustes; nadie ve los datos de otro. Tus datos se guardan en la carpeta de datos de la app
 en Umbrel y se conservan entre actualizaciones.
 
+## En el móvil
+
+Abre la app en Safari y usa **Compartir → Añadir a pantalla de inicio**: tendrás un icono propio y
+se abrirá a pantalla completa, como una app. Añádela con la dirección de Tailscale de tu servidor
+para que funcione también fuera de casa. Instrucciones también en **Ajustes → App en el móvil**.
+
 ## Copias de seguridad
 
 En **Ajustes → Copias de seguridad** (sólo administradores):
