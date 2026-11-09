@@ -12,10 +12,13 @@ Este repositorio es a la vez **el código de la app** y **una tienda comunitaria
 1. En Umbrel abre **App Store → ⋯ (arriba a la derecha) → Community App Stores**.
 2. Pega la URL de este repositorio y pulsa **Add**.
 3. Abre la tienda **Modo Guerrero** e instala la app.
-4. Abre Modo Guerrero → **Ajustes → Cuenta de Garmin** y conecta tu cuenta (admite verificación en dos pasos).
+4. Ábrela y **crea tu cuenta**: la primera persona que entra crea el usuario administrador.
+   Hazlo justo después de instalar.
+5. Ve a **Ajustes → Cuenta de Garmin** y conecta tu cuenta (admite verificación en dos pasos).
 
-La app queda protegida por el inicio de sesión de Umbrel. Tus datos se guardan en la carpeta de
-datos de la app en Umbrel y se conservan entre actualizaciones.
+La app tiene su propio inicio de sesión (no pide la contraseña de Umbrel), con la opción de
+recordar el dispositivo durante 90 días. Tus datos se guardan en la carpeta de datos de la app
+en Umbrel y se conservan entre actualizaciones.
 
 ## Actualizar
 
@@ -78,7 +81,6 @@ services:
     restart: unless-stopped
     ports: ["8095:8080"]
     environment:
-      APP_PASSWORD: "una-contraseña"          # sin el login de Umbrel, ponla siempre
       APP_SECRET_KEY: "frase-larga-aleatoria"  # cifra el token de Garmin
     volumes: ["./data:/data"]
 ```
@@ -87,6 +89,8 @@ services:
 
 - La contraseña de Garmin no se guarda: sólo un token de sesión cifrado (la clave se genera en tu
   servidor, en la carpeta de datos, y nunca está en este repositorio).
+- Contraseñas de la app guardadas con scrypt; bloqueo de 15 minutos tras 5 intentos fallidos;
+  sesiones en cookie HttpOnly y protección CSRF. Puedes ver y cerrar las sesiones abiertas en Ajustes.
 - No expongas la app a internet; usa Tailscale para entrar desde fuera.
 - El acceso a Garmin usa la librería no oficial `garminconnect`; si Garmin cambia su sistema puede
   fallar temporalmente. Siempre puedes importar archivos .FIT a mano desde Ajustes.

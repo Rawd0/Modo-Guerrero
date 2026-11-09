@@ -1,7 +1,5 @@
 """API web de Modo Guerrero."""
-import base64
 import logging
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,8 +7,8 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import db, garmin_auth, metrics, stats, sync
-from .config import APP_NAME, APP_PASSWORD, APP_USER, DEFAULT_SETTINGS, VERSION
+from . import auth, db, garmin_auth, metrics, stats, sync
+from .config import APP_NAME, DEFAULT_SETTINGS, VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -27,25 +25,111 @@ async def lifespan(_app):
 app = FastAPI(title=APP_NAME, version=VERSION, docs_url=None, redoc_url=None, lifespan=lifespan)
 
 
-# ---------- contraseña opcional (HTTP Basic) ----------
+# ---------- autenticación ----------
+CSRF_HEADER = "x-requested-with"
+CSRF_VALUE = "modo-guerrero"
+PUBLIC_API = ("/api/auth/",)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "?"
+
+
 @app.middleware("http")
-async def basic_auth(request: Request, call_next):
-    if APP_PASSWORD and request.url.path != "/healthz":
-        ok = False
-        h = request.headers.get("authorization", "")
-        if h.lower().startswith("basic "):
-            try:
-                user, _, pwd = base64.b64decode(h[6:]).decode().partition(":")
-                ok = secrets.compare_digest(user, APP_USER) and secrets.compare_digest(pwd, APP_PASSWORD)
-            except Exception:  # noqa: BLE001
-                ok = False
-        if not ok:
-            return Response(status_code=401, headers={"WWW-Authenticate": f'Basic realm="{APP_NAME}"'})
+async def session_auth(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/"):
+        # Protección CSRF: un formulario de otra web no puede añadir esta cabecera
+        if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get(CSRF_HEADER) != CSRF_VALUE:
+            return JSONResponse({"detail": "Petición no permitida"}, status_code=403)
+        user = auth.session_user(request.cookies.get(auth.COOKIE))
+        request.state.user = user
+        if not user and not path.startswith(PUBLIC_API):
+            return JSONResponse({"detail": "Inicia sesión", "auth": True}, status_code=401)
     resp = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
     # los mapas de OpenStreetMap exigen la cabecera Referer
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+def _set_cookie(request: Request, resp: Response, token: str, max_age):
+    resp.set_cookie(auth.COOKIE, token, max_age=max_age, httponly=True, samesite="lax",
+                    secure=request.url.scheme == "https", path="/")
+
+
+def _start_session(request: Request, user_id: int, remember: bool) -> JSONResponse:
+    token, max_age = auth.new_session(user_id, remember, request.headers.get("user-agent", ""), _client_ip(request))
+    u = db.one("SELECT id, username, is_admin FROM users WHERE id=?", (user_id,))
+    resp = JSONResponse({"ok": True, "user": {"username": u["username"], "is_admin": bool(u["is_admin"])}})
+    _set_cookie(request, resp, token, max_age)
+    return resp
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    u = request.state.user
+    return {"setup_required": auth.user_count() == 0,
+            "user": {"username": u["username"], "is_admin": u["is_admin"]} if u else None,
+            "version": VERSION}
+
+
+@app.post("/api/auth/setup")
+def auth_setup(request: Request, payload: dict = Body(...)):
+    try:
+        uid = auth.setup_first_user(payload.get("username", ""), payload.get("password", ""))
+    except auth.AuthFailed as e:
+        raise HTTPException(400, str(e))
+    return _start_session(request, uid, bool(payload.get("remember", True)))
+
+
+@app.post("/api/auth/login")
+def auth_login(request: Request, payload: dict = Body(...)):
+    try:
+        u = auth.login(payload.get("username", ""), payload.get("password", ""), _client_ip(request))
+    except auth.AuthFailed as e:
+        raise HTTPException(401, str(e))
+    return _start_session(request, u["id"], bool(payload.get("remember", False)))
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    auth.end_session(request.cookies.get(auth.COOKIE))
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.COOKIE, path="/")
+    return resp
+
+
+@app.post("/api/account/password")
+def account_password(request: Request, payload: dict = Body(...)):
+    u = request.state.user
+    try:
+        auth.change_password(u["id"], payload.get("current", ""), payload.get("new", ""), u["token_hash"])
+    except auth.AuthFailed as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+@app.get("/api/account/sessions")
+def account_sessions(request: Request):
+    u = request.state.user
+    return auth.list_sessions(u["id"], u["token_hash"])
+
+
+@app.delete("/api/account/sessions/{sid}")
+def account_revoke(request: Request, sid: str):
+    auth.revoke_session(request.state.user["id"], sid)
+    return {"ok": True}
+
+
+@app.post("/api/account/sessions/revoke-others")
+def account_revoke_others(request: Request):
+    u = request.state.user
+    auth.revoke_others(u["id"], u["token_hash"])
+    return {"ok": True}
 
 
 @app.get("/healthz")

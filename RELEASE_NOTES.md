@@ -1,9 +1,7 @@
-Primera versión de Modo Guerrero.
+Inicio de sesión propio: ya no se pide la contraseña de Umbrel.
 
-- Sincronización automática con Garmin Connect, con verificación en dos pasos.
-- Historial de carreras con mapa, gráficas de ritmo, FC y altitud, y parciales por kilómetro.
-- Récords personales (400 m a maratón) calculados dentro de cualquier carrera.
-- Forma y carga (CTL/ATL/TSB), VO2max y estado de entrenamiento de Garmin.
-- Salud diaria: sueño, VFC, FC en reposo, Body Battery, estrés y pasos.
-- Inicio personalizable con widgets.
-- Importación manual de archivos .FIT.
+- Al abrir la app por primera vez tras actualizar, crea tu cuenta (será la de administrador). Hazlo justo después de actualizar.
+- Opción «Recordar este dispositivo» durante 90 días: en el móvil no tendrás que volver a escribir la contraseña.
+- Contraseñas guardadas con scrypt, bloqueo de 15 minutos tras 5 intentos fallidos y protección CSRF.
+- Nueva tarjeta «Tu cuenta» en Ajustes: cambiar la contraseña, ver los dispositivos con sesión abierta y cerrarlos.
+- Base preparada para tener varios usuarios en el futuro.

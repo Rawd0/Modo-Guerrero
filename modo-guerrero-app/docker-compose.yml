@@ -6,6 +6,9 @@ services:
       # formato: <id-de-la-app>_<servicio>_1
       APP_HOST: modo-guerrero-app_web_1
       APP_PORT: 8080
+      # La app tiene su propio inicio de sesión (usuarios y "recordar dispositivo"),
+      # así que no se pide además la contraseña de Umbrel.
+      PROXY_AUTH_ADD: "false"
 
   web:
     # La acción de GitHub "release" actualiza esta línea en cada versión.

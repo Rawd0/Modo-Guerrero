@@ -9,10 +9,6 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "modo-guerrero.db"
 
-# Contraseña opcional para proteger la web (HTTP Basic). Vacía = sin login propio.
-APP_PASSWORD = os.getenv("APP_PASSWORD", "")
-APP_USER = os.getenv("APP_USER", "guerrero")
-
 # Clave para cifrar el token de Garmin. Si no se define, se genera un fichero en DATA_DIR.
 APP_SECRET_KEY = os.getenv("APP_SECRET_KEY", "")
 

@@ -8,7 +8,7 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 async function api(path, opts = {}) {
-  const o = { headers: {}, ...opts };
+  const o = { headers: { "X-Requested-With": "modo-guerrero" }, credentials: "same-origin", ...opts };
   if (o.body && !(o.body instanceof FormData)) {
     o.headers["Content-Type"] = "application/json";
     o.body = JSON.stringify(o.body);
@@ -16,9 +16,17 @@ async function api(path, opts = {}) {
   const r = await fetch(path, o);
   let data = null;
   try { data = await r.json(); } catch { /* vacío */ }
+  if (r.status === 401 && data && data.auth) {
+    // sesión caducada o cerrada: volver a la pantalla de acceso
+    AUTHED = false;
+    showAuth(false);
+    throw new Error("Inicia sesión");
+  }
   if (!r.ok) throw new Error((data && data.detail) || `Error ${r.status}`);
   return data;
 }
+let AUTHED = false;
+let ME = null;
 
 function toast(msg, err = false) {
   const t = $("#toast");
@@ -154,6 +162,7 @@ function map(el, latlngs, opts = {}) {
 // ---------------------------------------------------------------- estado / sync
 let STATUS = null;
 async function refreshStatus() {
+  if (!AUTHED) return;
   try {
     STATUS = await api("/api/status");
   } catch { return; }
@@ -222,7 +231,7 @@ async function rerender() {
   }
   refreshStatus();
 }
-window.addEventListener("hashchange", () => { window.scrollTo(0, 0); rerender(); });
+window.addEventListener("hashchange", () => { if (!AUTHED) return; window.scrollTo(0, 0); rerender(); });
 
 // ================================================================ INICIO
 const WIDGETS = {
@@ -790,12 +799,33 @@ route("stats", async (view) => {
 
 // ================================================================ AJUSTES
 route("ajustes", async (view) => {
-  const [st, set, log] = await Promise.all([api("/api/status"), api("/api/settings"), api("/api/sync/log")]);
+  const [st, set, log, sessions] = await Promise.all([api("/api/status"), api("/api/settings"), api("/api/sync/log"), api("/api/account/sessions")]);
   view.innerHTML = `
     <div class="page-head"><div><h1>Ajustes</h1><div class="sub">Modo Guerrero v${esc(st.version)}</div></div></div>
     <div class="grid">
       <div class="card"><h3>Cuenta de Garmin ${st.connected ? `<span class="tag good">Conectada</span>` : `<span class="tag bad">Sin conectar</span>`}</h3>
         <div id="garminBox"></div>
+      </div>
+      <div class="card"><h3>Tu cuenta ${ME && ME.is_admin ? `<span class="tag accent">Administrador</span>` : ""}</h3>
+        <p>Has iniciado sesión como <b>${esc(ME ? ME.username : "")}</b>.</p>
+        <div class="row"><button class="btn" id="logoutBtn">Cerrar sesión</button><button class="btn ghost" id="pwToggle">Cambiar contraseña</button></div>
+        <form id="pwForm" class="form-grid" style="grid-template-columns:1fr;margin-top:14px" hidden>
+          <input type="text" autocomplete="username" value="${esc(ME ? ME.username : "")}" hidden>
+          <label class="field">Contraseña actual<input type="password" id="pwCur" required autocomplete="current-password"></label>
+          <label class="field">Nueva contraseña<input type="password" id="pwNew" required minlength="10" autocomplete="new-password"></label>
+          <label class="field">Repite la nueva<input type="password" id="pwNew2" required minlength="10" autocomplete="new-password"></label>
+          <div class="row"><button class="btn primary">Guardar contraseña</button></div>
+          <div class="faint" style="font-size:12px">Al cambiarla se cierra la sesión en el resto de dispositivos.</div>
+          <div id="pwMsg"></div>
+        </form>
+        <h3 style="margin-top:20px">Dispositivos con sesión abierta</h3>
+        <div class="rec-list">${sessions.map((x) => `
+          <div class="rec-row" style="grid-template-columns:1fr auto">
+            <span>${esc(deviceName(x.user_agent))} ${x.current ? `<span class="tag good">Este dispositivo</span>` : ""}<br>
+              <span class="faint" style="font-size:12px">Último uso ${esc(timeAgo(x.last_seen))} · ${x.remember ? "recordado hasta el " + fdateShort(x.expires) : "sesión corta"}</span></span>
+            ${x.current ? "" : `<button class="btn small ghost" data-revoke="${esc(x.id)}">Cerrar</button>`}
+          </div>`).join("")}</div>
+        ${sessions.length > 1 ? `<div class="row" style="margin-top:10px"><button class="btn small" id="revokeOthers">Cerrar sesión en los demás</button></div>` : ""}
       </div>
       <div class="card"><h3>Sincronización</h3>
         <div class="muted" style="font-size:13px;margin-bottom:12px">
@@ -835,6 +865,20 @@ route("ajustes", async (view) => {
       </div>
     </div>`;
   garminBox($("#garminBox"), st);
+  $("#logoutBtn").onclick = logout;
+  $("#pwToggle").onclick = () => { const f = $("#pwForm"); f.hidden = !f.hidden; if (!f.hidden) $("#pwCur").focus(); };
+  $("#pwForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const m = $("#pwMsg");
+    if ($("#pwNew").value !== $("#pwNew2").value) { m.innerHTML = `<p class="tag bad">Las contraseñas nuevas no coinciden.</p>`; return; }
+    try {
+      await api("/api/account/password", { method: "POST", body: { current: $("#pwCur").value, new: $("#pwNew").value } });
+      toast("Contraseña cambiada"); rerender();
+    } catch (err) { m.innerHTML = `<p class="tag bad" style="white-space:normal">${esc(err.message)}</p>`; }
+  };
+  $$("[data-revoke]").forEach((b) => (b.onclick = async () => { await api(`/api/account/sessions/${b.dataset.revoke}`, { method: "DELETE" }); rerender(); }));
+  const ro = $("#revokeOthers");
+  if (ro) ro.onclick = async () => { await api("/api/account/sessions/revoke-others", { method: "POST" }); toast("Sesiones cerradas"); rerender(); };
   const num = (id) => { const v = $(id).value; return v === "" ? null : +v; };
   $("#saveSync").onclick = async () => { await api("/api/settings", { method: "PUT", body: { sync_interval_min: num("#s_int") || 60, fit_per_run: num("#s_fit") || 40, health_backfill_days: num("#s_back") || 180 } }); toast("Guardado. El nuevo intervalo se aplica tras la próxima sincronización."); };
   $("#saveGoals").onclick = async () => { await api("/api/settings", { method: "PUT", body: { weekly_goal_km: num("#g_w"), monthly_goal_km: num("#g_m"), yearly_goal_km: num("#g_y"), hr_max: num("#h_max"), hr_rest: num("#h_rest") } }); toast("Guardado"); };
@@ -857,6 +901,13 @@ route("ajustes", async (view) => {
     } catch (e) { $("#upRes").innerHTML = `<span class="tag bad">${esc(e.message)}</span>`; }
   }
 });
+
+function deviceName(ua) {
+  ua = ua || "";
+  const os = /iPhone/.test(ua) ? "iPhone" : /iPad/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Mac OS X/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux/.test(ua) ? "Linux" : "Dispositivo";
+  const br = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /CriOS|Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
+  return br ? `${br} en ${os}` : os;
+}
 
 function garminBox(box, st) {
   if (st.connected) {
@@ -916,5 +967,67 @@ function mfaForm(box) {
   };
 }
 
+// ---------------------------------------------------------------- acceso
+function showAuth(setup) {
+  disposeAll();
+  clearTimeout(refreshStatus._t);
+  document.body.classList.add("auth-screen");
+  $("#banner").hidden = true;
+  const view = $("#view");
+  view.innerHTML = `
+    <div class="auth-wrap"><div class="card auth-card">
+      <div class="auth-logo"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M8 22l6-12 4 8 3-5 3 9" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Modo Guerrero</span></div>
+      ${setup ? `<h2>Crea tu cuenta</h2><p class="muted">Es la primera vez que entras. Esta cuenta será la de administrador y con ella entrarás desde cualquier dispositivo.</p>`
+              : `<h2>Inicia sesión</h2>`}
+      <form id="af" class="form-grid" style="grid-template-columns:1fr">
+        <label class="field">Usuario<input type="text" id="au" required autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" minlength="3" maxlength="40"></label>
+        <label class="field">Contraseña<input type="password" id="ap" required autocomplete="${setup ? "new-password" : "current-password"}" ${setup ? 'minlength="10"' : ""}></label>
+        ${setup ? `<label class="field">Repite la contraseña<input type="password" id="ap2" required autocomplete="new-password" minlength="10"></label>
+                   <div class="faint" style="font-size:12px">Mínimo 10 caracteres. Una frase de varias palabras es fácil de recordar y difícil de adivinar.</div>` : ""}
+        <label class="check"><input type="checkbox" id="ar" checked> Recordar este dispositivo (90 días)</label>
+        <button class="btn primary" id="ab" style="justify-content:center">${setup ? "Crear cuenta y entrar" : "Entrar"}</button>
+        <div id="amsg"></div>
+      </form>
+    </div></div>`;
+  $("#au").focus();
+  $("#af").onsubmit = async (e) => {
+    e.preventDefault();
+    const msg = $("#amsg"), b = $("#ab");
+    msg.innerHTML = "";
+    if (setup && $("#ap").value !== $("#ap2").value) { msg.innerHTML = `<p class="tag bad">Las contraseñas no coinciden.</p>`; return; }
+    b.disabled = true;
+    try {
+      const r = await api(setup ? "/api/auth/setup" : "/api/auth/login", { method: "POST",
+        body: { username: $("#au").value, password: $("#ap").value, remember: $("#ar").checked } });
+      ME = r.user;
+      enterApp();
+    } catch (err) {
+      msg.innerHTML = `<p class="tag bad" style="white-space:normal">${esc(err.message)}</p>`;
+      b.disabled = false;
+    }
+  };
+}
+
+function enterApp() {
+  AUTHED = true;
+  document.body.classList.remove("auth-screen");
+  rerender();
+}
+
+async function logout() {
+  try { await api("/api/auth/logout", { method: "POST" }); } catch { /* da igual */ }
+  AUTHED = false; ME = null;
+  showAuth(false);
+}
+
 // ---------------------------------------------------------------- arranque
-rerender();
+(async () => {
+  try {
+    const me = await api("/api/auth/me");
+    $("#version").textContent = "v" + me.version;
+    if (me.user) { ME = me.user; enterApp(); }
+    else showAuth(me.setup_required);
+  } catch (e) {
+    $("#view").innerHTML = `<div class="empty"><h2>No se puede conectar con la app</h2><p>${esc(e.message)}</p></div>`;
+  }
+})();

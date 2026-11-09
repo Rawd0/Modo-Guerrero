@@ -70,6 +70,25 @@ CREATE TABLE IF NOT EXISTS snapshots (
     race_5k REAL, race_10k REAL, race_hm REAL, race_m REAL,
     raw TEXT
 );
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    pw_hash TEXT NOT NULL,
+    is_admin INTEGER DEFAULT 0,
+    created TEXT,
+    pw_changed TEXT
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created TEXT,
+    expires TEXT,
+    last_seen TEXT,
+    remember INTEGER DEFAULT 0,
+    user_agent TEXT,
+    ip TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions(user_id);
 CREATE TABLE IF NOT EXISTS sync_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     started TEXT, finished TEXT, status TEXT, message TEXT

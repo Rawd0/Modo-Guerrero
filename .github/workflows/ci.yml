@@ -36,11 +36,19 @@ jobs:
           python -m scripts.demo_data
           uvicorn app.main:app --port 8080 &
           for i in $(seq 1 20); do curl -fs localhost:8080/healthz && break; sleep 1; done
-          for p in status home activities records "stats?group=week" health fitness settings; do
-            curl -fs -o /dev/null "localhost:8080/api/$p" || { echo "Falla /api/$p"; exit 1; }
+          H="X-Requested-With: modo-guerrero"
+          # sin sesión, la API debe estar cerrada
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/home)" = "401" || { echo "La API no exige sesión"; exit 1; }
+          # crear la cuenta inicial y usar su cookie
+          curl -fs -c jar -H "$H" -H "Content-Type: application/json" \
+            -d '{"username":"ci","password":"contrasena-de-prueba","remember":true}' localhost:8080/api/auth/setup
+          for p in status home activities records "stats?group=week" health fitness settings account/sessions; do
+            curl -fs -b jar -o /dev/null "localhost:8080/api/$p" || { echo "Falla /api/$p"; exit 1; }
           done
-          id=$(curl -fs localhost:8080/api/activities | python -c "import sys,json;print(json.load(sys.stdin)['items'][0]['id'])")
-          curl -fs -o /dev/null "localhost:8080/api/activities/$id"
+          id=$(curl -fs -b jar localhost:8080/api/activities | python -c "import sys,json;print(json.load(sys.stdin)['items'][0]['id'])")
+          curl -fs -b jar -o /dev/null "localhost:8080/api/activities/$id"
+          # sin la cabecera anti-CSRF, las escrituras se rechazan
+          test "$(curl -s -b jar -o /dev/null -w '%{http_code}' -X POST localhost:8080/api/sync)" = "403" || { echo "Falta protección CSRF"; exit 1; }
           curl -fs localhost:8080/ | grep -q "vci" || { echo "La versión no aparece en la página"; exit 1; }
           echo "Todo correcto"
 
