@@ -250,6 +250,7 @@ td .date { font-size: 12px; color: var(--muted); }
   .big { font-size: 32px; }
   .banner { margin: 10px 12px 0; }
   .filters input[type=search] { width: 100%; }
+  .seg button { padding: 5px 9px; }
 }
 
 /* ---------- acceso ---------- */
@@ -293,7 +294,9 @@ body { padding-top: var(--sat); padding-bottom: env(safe-area-inset-bottom); }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 /* como app instalada: sin rebote del fondo ni resaltado gris al tocar */
 @media (display-mode: standalone) {
-  .topbar { padding-top: 14px; padding-bottom: 10px; }
+  /* iOS 26 difumina una franja bajo la barra de estado: bajamos el contenido de la cabecera para que
+     el logo y el estado de sincronización queden fuera de ese difuminado */
+  .topbar { padding-top: 46px; padding-bottom: 10px; }
   html, body { overscroll-behavior-y: none; }
   a, button { -webkit-tap-highlight-color: transparent; }
   .standalone-only { display: inline-flex !important; }

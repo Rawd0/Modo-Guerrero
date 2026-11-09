@@ -743,7 +743,7 @@ route("salud", async (view) => {
   const H = await api(`/api/health?days=${healthDays}`);
   view.innerHTML = `
     <div class="page-head"><div><h1>Salud</h1><div class="sub">Sueño, variabilidad cardiaca, pulso en reposo, Body Battery y estrés</div></div>
-      <div class="seg" id="range">${[30, 90, 180, 365].map((n) => `<button data-n="${n}" class="${n === healthDays ? "on" : ""}">${n} días</button>`).join("")}</div></div>
+      <div class="seg" id="range">${[[7, "7 días"], [30, "30 días"], [90, "90 días"], [180, "6 meses"], [365, "1 año"]].map(([n, l]) => `<button data-n="${n}" class="${n === healthDays ? "on" : ""}">${l}</button>`).join("")}</div></div>
     ${H.length ? `
     <div class="grid">
       <div class="card wide"><h3>Sueño</h3><div class="legend"><span><i style="background:var(--c-sleep-deep)"></i>Profundo</span><span><i style="background:var(--c-sleep-rem)"></i>REM</span><span><i style="background:var(--c-sleep-light)"></i>Ligero</span><span><i style="background:var(--c-sleep-awake)"></i>Despierto</span><span><i style="background:var(--accent)"></i>Puntuación</span></div><div class="chart tall" id="hSleep"></div></div>
@@ -756,7 +756,9 @@ route("salud", async (view) => {
   $$("#range button").forEach((b) => (b.onclick = () => { healthDays = +b.dataset.n; rerender(); }));
   if (!H.length) return;
   const t = theme(), dates = H.map((x) => x.date);
-  const xa = { type: "category", data: dates, axisLabel: { formatter: (v) => fdateShort(v) } };
+  // con pocos días se marcan los puntos y se pone el día de la semana
+  const short = H.length <= 14, sym = short ? "circle" : "none";
+  const xa = { type: "category", data: dates, axisLabel: { formatter: (v) => short ? `${WEEKDAYS[new Date(v + "T12:00:00").getDay()]} ${new Date(v + "T12:00:00").getDate()}` : fdateShort(v) } };
   const h = (s) => (s == null ? null : +(s / 3600).toFixed(2));
   chart($("#hSleep"), {
     xAxis: xa, yAxis: [{ type: "value" }, { type: "value", min: 0, max: 100, splitLine: { show: false } }],
@@ -764,34 +766,34 @@ route("salud", async (view) => {
     series: [
       ["Profundo", "deep_s", "--c-sleep-deep"], ["REM", "rem_s", "--c-sleep-rem"], ["Ligero", "light_s", "--c-sleep-light"], ["Despierto", "awake_s", "--c-sleep-awake"],
     ].map(([n, k, c]) => ({ name: n, type: "bar", stack: "s", data: H.map((x) => h(x[k])), itemStyle: { color: css(c) }, barCategoryGap: "25%" }))
-      .concat([{ name: "Puntuación", type: "line", yAxisIndex: 1, data: H.map((x) => x.sleep_score), symbol: "none", smooth: true, lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent } }]),
+      .concat([{ name: "Puntuación", type: "line", yAxisIndex: 1, data: H.map((x) => x.sleep_score), symbol: sym, symbolSize: 6, smooth: true, lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent } }]),
   });
   chart($("#hHrv"), {
     xAxis: xa, yAxis: { type: "value", scale: true },
     series: [
       { name: "Rango normal (bajo)", type: "line", data: H.map((x) => x.hrv_low), stack: "band", symbol: "none", lineStyle: { opacity: 0 }, tooltip: { show: false } },
       { name: "Rango normal", type: "line", data: H.map((x) => (x.hrv_high != null && x.hrv_low != null ? x.hrv_high - x.hrv_low : null)), stack: "band", symbol: "none", lineStyle: { opacity: 0 }, areaStyle: { color: t.good + "22" }, tooltip: { show: false } },
-      { name: "Media 7 d", type: "line", data: H.map((x) => x.hrv_weekly), symbol: "none", smooth: true, lineStyle: { color: t.good, width: 2.5 }, itemStyle: { color: t.good } },
+      { name: "Media 7 d", type: "line", data: H.map((x) => x.hrv_weekly), symbol: sym, symbolSize: 6, smooth: true, lineStyle: { color: t.good, width: 2.5 }, itemStyle: { color: t.good } },
       { name: "Noche", type: "scatter", data: H.map((x) => x.hrv_night), symbolSize: 5, itemStyle: { color: t.good + "aa" } },
     ],
   });
   chart($("#hRhr"), {
     xAxis: xa, yAxis: { type: "value", scale: true },
-    series: [{ name: "FC reposo", type: "line", data: H.map((x) => x.rhr), smooth: true, symbol: "none", lineStyle: { color: t.bad, width: 2 }, itemStyle: { color: t.bad }, areaStyle: { color: t.bad + "18" } }],
+    series: [{ name: "FC reposo", type: "line", data: H.map((x) => x.rhr), smooth: true, symbol: sym, symbolSize: 6, lineStyle: { color: t.bad, width: 2 }, itemStyle: { color: t.bad }, areaStyle: { color: t.bad + "18" } }],
   });
   chart($("#hBb"), {
     xAxis: xa, yAxis: { type: "value", min: 0, max: 100 },
     series: [
       { name: "Mínimo", type: "line", data: H.map((x) => x.bb_low), stack: "bb", symbol: "none", lineStyle: { opacity: 0 }, itemStyle: { color: t.blue } },
       { name: "Recarga", type: "line", data: H.map((x) => (x.bb_high != null && x.bb_low != null ? x.bb_high - x.bb_low : null)), stack: "bb", symbol: "none", lineStyle: { opacity: 0 }, areaStyle: { color: t.blue + "55" }, itemStyle: { color: t.blue } },
-      { name: "Máximo", type: "line", data: H.map((x) => x.bb_high), symbol: "none", smooth: true, lineStyle: { color: t.blue, width: 2 }, itemStyle: { color: t.blue } },
+      { name: "Máximo", type: "line", data: H.map((x) => x.bb_high), symbol: sym, symbolSize: 6, smooth: true, lineStyle: { color: t.blue, width: 2 }, itemStyle: { color: t.blue } },
     ],
   });
   chart($("#hStress"), {
     xAxis: xa, yAxis: { type: "value", min: 0, max: 100 },
     series: [
-      { name: "Estrés medio", type: "line", data: H.map((x) => x.stress_avg), smooth: true, symbol: "none", lineStyle: { color: t.warn, width: 2 }, itemStyle: { color: t.warn } },
-      { name: "Disposición", type: "line", data: H.map((x) => x.readiness), smooth: true, symbol: "none", lineStyle: { color: t.violet, width: 2 }, itemStyle: { color: t.violet } },
+      { name: "Estrés medio", type: "line", data: H.map((x) => x.stress_avg), smooth: true, symbol: sym, symbolSize: 6, lineStyle: { color: t.warn, width: 2 }, itemStyle: { color: t.warn } },
+      { name: "Disposición", type: "line", data: H.map((x) => x.readiness), smooth: true, symbol: sym, symbolSize: 6, lineStyle: { color: t.violet, width: 2 }, itemStyle: { color: t.violet } },
     ],
   });
   chart($("#hSteps"), {
