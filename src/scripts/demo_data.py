@@ -1,5 +1,7 @@
 """Genera datos de ejemplo (carreras + salud) para probar Modo Guerrero sin cuenta de Garmin.
 
+Los datos quedan "sin asignar" y pasan al primer administrador que se cree.
+
 Uso:  docker compose exec modo-guerrero python -m scripts.demo_data
       (o, en desarrollo:  DATA_DIR=./data python -m scripts.demo_data)
 NO lo ejecutes sobre tus datos reales: borra la base de datos.
@@ -87,19 +89,19 @@ def main():
             sleep = random.gauss(7.2, 0.7) * 3600
             hrv = random.gauss(58 + 6 * fitness, 6)
             db.upsert("daily_health", {
-                "date": day.isoformat(), "sleep_s": sleep, "sleep_score": int(min(98, max(40, random.gauss(78, 9)))),
+                "user_id": 0, "date": day.isoformat(), "sleep_s": sleep, "sleep_score": int(min(98, max(40, random.gauss(78, 9)))),
                 "deep_s": sleep * .18, "rem_s": sleep * .22, "light_s": sleep * .55, "awake_s": sleep * .05,
                 "hrv_night": round(hrv), "hrv_weekly": round(58 + 6 * fitness), "hrv_status": "BALANCED",
                 "hrv_low": 50, "hrv_high": 70, "rhr": round(random.gauss(50 - 4 * fitness, 1.5)),
                 "bb_high": int(random.gauss(85, 8)), "bb_low": int(random.gauss(22, 6)), "bb_last": int(random.gauss(60, 15)),
                 "stress_avg": int(random.gauss(30, 6)), "steps": int(random.gauss(11000, 3000)),
-                "readiness": int(min(100, max(10, random.gauss(68, 15)))), "readiness_level": "MODERATE", "raw": None}, "date")
+                "readiness": int(min(100, max(10, random.gauss(68, 15)))), "readiness_level": "MODERATE", "raw": None}, ("user_id", "date"))
         day += timedelta(days=1)
-    db.upsert("snapshots", {"date": today.isoformat(), "vo2max": 54.0, "training_status": "PRODUCTIVE",
+    db.upsert("snapshots", {"user_id": 0, "date": today.isoformat(), "vo2max": 54.0, "training_status": "PRODUCTIVE",
                             "status_phrase": "PRODUCTIVE_6", "acute_load": 540, "chronic_load": 480, "acwr": 1.1,
                             "race_5k": 1230, "race_10k": 2580, "race_hm": 5700, "race_m": 12100,
-                            "raw": json.dumps({})}, "date")
-    db.set_setting("garmin_email", "demo@ejemplo.com")
+                            "raw": json.dumps({})}, ("user_id", "date"))
+    db.set_setting(0, "garmin_email", "demo@ejemplo.com")
     print("Datos de demostración creados en", DB_PATH)
 
 

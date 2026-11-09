@@ -17,7 +17,11 @@ Este repositorio es a la vez **el código de la app** y **una tienda comunitaria
 5. Ve a **Ajustes → Cuenta de Garmin** y conecta tu cuenta (admite verificación en dos pasos).
 
 La app tiene su propio inicio de sesión (no pide la contraseña de Umbrel), con la opción de
-recordar el dispositivo durante 90 días. Tus datos se guardan en la carpeta de datos de la app
+recordar el dispositivo durante 90 días.
+
+**Varios usuarios:** el administrador crea más cuentas en **Ajustes → Usuarios** con una contraseña
+temporal. Cada persona elige la suya al entrar por primera vez, conecta su propia cuenta de Garmin y
+tiene sus propios datos y ajustes; nadie ve los datos de otro. Tus datos se guardan en la carpeta de datos de la app
 en Umbrel y se conservan entre actualizaciones.
 
 ## Actualizar

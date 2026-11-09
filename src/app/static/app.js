@@ -22,6 +22,10 @@ async function api(path, opts = {}) {
     showAuth(false);
     throw new Error("Inicia sesión");
   }
+  if (r.status === 403 && data && data.must_change) {
+    showForcedChange();
+    throw new Error(data.detail);
+  }
   if (!r.ok) throw new Error((data && data.detail) || `Error ${r.status}`);
   return data;
 }
@@ -816,7 +820,8 @@ route("stats", async (view) => {
 
 // ================================================================ AJUSTES
 route("ajustes", async (view) => {
-  const [st, set, log, sessions] = await Promise.all([api("/api/status"), api("/api/settings"), api("/api/sync/log"), api("/api/account/sessions")]);
+  const [st, set, log, sessions, users] = await Promise.all([api("/api/status"), api("/api/settings"), api("/api/sync/log"),
+    api("/api/account/sessions"), ME && ME.is_admin ? api("/api/admin/users") : Promise.resolve(null)]);
   view.innerHTML = `
     <div class="page-head"><div><h1>Ajustes</h1><div class="sub">Modo Guerrero v${esc(st.version)}</div></div></div>
     <div class="grid">
@@ -886,6 +891,30 @@ route("ajustes", async (view) => {
         <div class="muted" style="font-size:12px;margin-top:8px">Si la actividad ya existe, sólo se le añade el detalle. Útil como plan B si Garmin falla.</div>
         <div id="upRes" style="margin-top:8px;font-size:13px"></div>
       </div>
+      ${users ? `<div class="card wide" style="grid-column:1/-1"><h3>Usuarios <span class="tag">${users.length}</span></h3>
+        <p class="muted" style="font-size:13px;margin-top:0">Cada usuario tiene sus propios datos, su cuenta de Garmin y sus ajustes; nadie ve los datos de otro, tampoco el administrador.</p>
+        <div class="table-wrap" style="border:0"><table>
+          <thead><tr><th class="l">Usuario</th><th class="l">Garmin</th><th>Carreras</th><th class="l">Último acceso</th><th></th></tr></thead>
+          <tbody>${users.map((u) => `<tr>
+            <td class="l"><b>${esc(u.username)}</b> ${u.is_admin ? `<span class="tag accent">Admin</span>` : ""} ${u.must_change ? `<span class="tag warn">Contraseña temporal</span>` : ""}</td>
+            <td class="l">${u.garmin ? `<span class="tag good">Conectado</span>` : `<span class="tag">No</span>`}</td>
+            <td class="num">${int(u.runs)}</td>
+            <td class="l faint">${u.last_seen ? esc(timeAgo(u.last_seen)) : "nunca"}</td>
+            <td>${u.username.toLowerCase() === (ME.username || "").toLowerCase() ? `<span class="faint">Tú</span>` : `
+              <button class="btn small ghost" data-reset="${u.id}" data-name="${esc(u.username)}">Restablecer contraseña</button>
+              <button class="btn small ghost" data-mkadmin="${u.id}" data-val="${u.is_admin ? 0 : 1}">${u.is_admin ? "Quitar admin" : "Hacer admin"}</button>
+              <button class="btn small ghost" data-del="${u.id}" data-name="${esc(u.username)}" style="color:var(--bad)">Eliminar</button>`}</td>
+          </tr>`).join("")}</tbody></table></div>
+        <h3 style="margin-top:20px">Crear usuario</h3>
+        <form id="nu" class="form-grid">
+          <label class="field">Usuario<input type="text" id="nuName" required minlength="3" maxlength="40" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>
+          <label class="field">Contraseña temporal<input type="text" id="nuPass" required minlength="10" autocomplete="off" spellcheck="false"></label>
+          <label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="nuAdmin"> Administrador</label>
+          <div class="row" style="align-self:end"><button type="button" class="btn" id="nuGen">Generar contraseña</button><button class="btn primary">Crear</button></div>
+        </form>
+        <div class="faint" style="font-size:12px;margin-top:6px">Pásale el usuario y la contraseña temporal. Al entrar por primera vez tendrá que elegir la suya y conectar su propia cuenta de Garmin.</div>
+        <div id="nuMsg" style="margin-top:8px"></div>
+      </div>` : ""}
       <div class="card wide" style="grid-column:1/-1"><h3>Historial de sincronizaciones</h3>
         <div class="table-wrap log" style="border:0"><table><thead><tr><th class="l">Inicio</th><th class="l">Estado</th><th class="l">Resultado</th></tr></thead>
         <tbody>${log.map((l) => `<tr><td class="l num">${esc((l.started || "").replace("T", " "))}</td><td class="l">${{ ok: '<span class="tag good">Correcta</span>', running: '<span class="tag accent">En curso</span>', auth: '<span class="tag bad">Sesión</span>', rate: '<span class="tag warn">Límite</span>' }[l.status] || '<span class="tag bad">Error</span>'}</td><td class="l">${esc(l.message || "")}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Todavía no ha habido sincronizaciones.</td></tr>`}</tbody></table></div>
@@ -893,6 +922,7 @@ route("ajustes", async (view) => {
     </div>`;
   garminBox($("#garminBox"), st);
   $("#logoutBtn").onclick = logout;
+  if (users) setupUserAdmin();
   const saveAppearance = async (theme, accent) => {
     applyTheme(theme, accent);
     await api("/api/settings", { method: "PUT", body: { theme, accent } });
@@ -936,6 +966,47 @@ route("ajustes", async (view) => {
     } catch (e) { $("#upRes").innerHTML = `<span class="tag bad">${esc(e.message)}</span>`; }
   }
 });
+
+function tempPassword() {
+  // contraseña temporal legible: 4 grupos de 4 caracteres sin ambigüedades (0/O, 1/l)
+  const abc = "abcdefghjkmnpqrstuvwxyz23456789";
+  const rnd = crypto.getRandomValues(new Uint32Array(16));
+  return [...rnd].map((n) => abc[n % abc.length]).join("").match(/.{4}/g).join("-");
+}
+
+function setupUserAdmin() {
+  $("#nuGen").onclick = () => { $("#nuPass").value = tempPassword(); };
+  $("#nu").onsubmit = async (e) => {
+    e.preventDefault();
+    const name = $("#nuName").value.trim(), pass = $("#nuPass").value;
+    try {
+      await api("/api/admin/users", { method: "POST", body: { username: name, password: pass, is_admin: $("#nuAdmin").checked } });
+      await rerender();
+      $("#nuMsg").innerHTML = `<p class="tag good" style="white-space:normal">Usuario <b>${esc(name)}</b> creado. Contraseña temporal: <b class="num">${esc(pass)}</b> (cópiala ahora; no se vuelve a mostrar).</p>`;
+    } catch (err) { $("#nuMsg").innerHTML = `<p class="tag bad" style="white-space:normal">${esc(err.message)}</p>`; }
+  };
+  $$("[data-reset]").forEach((b) => (b.onclick = async () => {
+    const pass = tempPassword();
+    if (!confirm(`¿Restablecer la contraseña de ${b.dataset.name}? Se cerrarán sus sesiones y tendrá que elegir una nueva al entrar.`)) return;
+    try {
+      await api(`/api/admin/users/${b.dataset.reset}/password`, { method: "POST", body: { password: pass } });
+      await rerender();
+      $("#nuMsg").innerHTML = `<p class="tag good" style="white-space:normal">Nueva contraseña temporal de <b>${esc(b.dataset.name)}</b>: <b class="num">${esc(pass)}</b> (cópiala ahora).</p>`;
+    } catch (err) { toast(err.message, true); }
+  }));
+  $$("[data-mkadmin]").forEach((b) => (b.onclick = async () => {
+    try { await api(`/api/admin/users/${b.dataset.mkadmin}/admin`, { method: "POST", body: { is_admin: b.dataset.val === "1" } }); rerender(); }
+    catch (err) { toast(err.message, true); }
+  }));
+  $$("[data-del]").forEach((b) => (b.onclick = async () => {
+    const name = b.dataset.name;
+    const typed = prompt(`Se borrarán la cuenta de ${name} y TODOS sus datos (carreras, salud, ajustes). No se puede deshacer.\n\nEscribe "${name}" para confirmar:`);
+    if (typed === null) return;
+    if (typed.trim().toLowerCase() !== name.toLowerCase()) { toast("El nombre no coincide; no se ha eliminado nada.", true); return; }
+    try { await api(`/api/admin/users/${b.dataset.del}`, { method: "DELETE" }); toast(`${name} eliminado`); rerender(); }
+    catch (err) { toast(err.message, true); }
+  }));
+}
 
 function deviceName(ua) {
   ua = ua || "";
@@ -1035,11 +1106,46 @@ function showAuth(setup) {
       const r = await api(setup ? "/api/auth/setup" : "/api/auth/login", { method: "POST",
         body: { username: $("#au").value, password: $("#ap").value, remember: $("#ar").checked } });
       ME = r.user;
-      enterApp();
+      if (ME.must_change) showForcedChange(); else enterApp();
     } catch (err) {
       msg.innerHTML = `<p class="tag bad" style="white-space:normal">${esc(err.message)}</p>`;
       b.disabled = false;
     }
+  };
+}
+
+function showForcedChange() {
+  disposeAll();
+  clearTimeout(refreshStatus._t);
+  AUTHED = false;
+  document.body.classList.add("auth-screen");
+  $("#view").innerHTML = `
+    <div class="auth-wrap"><div class="card auth-card">
+      <div class="auth-logo"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M8 22l6-12 4 8 3-5 3 9" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Modo Guerrero</span></div>
+      <h2>Elige tu contraseña</h2>
+      <p class="muted">Hola${ME ? ", <b>" + esc(ME.username) + "</b>" : ""}. Estás usando una contraseña temporal; cámbiala por una que sólo sepas tú.</p>
+      <form id="fc" class="form-grid" style="grid-template-columns:1fr">
+        <input type="text" autocomplete="username" value="${esc(ME ? ME.username : "")}" hidden>
+        <label class="field">Contraseña temporal<input type="password" id="fcCur" required autocomplete="current-password"></label>
+        <label class="field">Nueva contraseña<input type="password" id="fcNew" required minlength="10" autocomplete="new-password"></label>
+        <label class="field">Repite la nueva<input type="password" id="fcNew2" required minlength="10" autocomplete="new-password"></label>
+        <button class="btn primary" style="justify-content:center">Guardar y entrar</button>
+        <button type="button" class="btn ghost" id="fcOut" style="justify-content:center">Cerrar sesión</button>
+        <div id="fcMsg"></div>
+      </form>
+    </div></div>`;
+  $("#fcCur").focus();
+  $("#fcOut").onclick = logout;
+  $("#fc").onsubmit = async (e) => {
+    e.preventDefault();
+    const m = $("#fcMsg");
+    if ($("#fcNew").value !== $("#fcNew2").value) { m.innerHTML = `<p class="tag bad">Las contraseñas no coinciden.</p>`; return; }
+    try {
+      await api("/api/account/password", { method: "POST", body: { current: $("#fcCur").value, new: $("#fcNew").value } });
+      ME.must_change = false;
+      toast("Contraseña guardada");
+      enterApp();
+    } catch (err) { m.innerHTML = `<p class="tag bad" style="white-space:normal">${esc(err.message)}</p>`; }
   };
 }
 
@@ -1061,7 +1167,7 @@ async function logout() {
   try {
     const me = await api("/api/auth/me");
     $("#version").textContent = "v" + me.version;
-    if (me.user) { ME = me.user; enterApp(); }
+    if (me.user) { ME = me.user; if (ME.must_change) showForcedChange(); else enterApp(); }
     else showAuth(me.setup_required);
   } catch (e) {
     $("#view").innerHTML = `<div class="empty"><h2>No se puede conectar con la app</h2><p>${esc(e.message)}</p></div>`;

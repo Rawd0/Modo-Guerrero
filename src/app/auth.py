@@ -65,7 +65,7 @@ def user_count() -> int:
     return db.one("SELECT COUNT(*) n FROM users")["n"]
 
 
-def create_user(username: str, password: str, is_admin=False) -> int:
+def create_user(username: str, password: str, is_admin=False, must_change=False) -> int:
     username = (username or "").strip()
     if not (3 <= len(username) <= 40) or not all(c.isalnum() or c in "._-" for c in username):
         raise AuthFailed("El usuario debe tener entre 3 y 40 caracteres: letras, números, punto, guion o guion bajo.")
@@ -74,8 +74,9 @@ def create_user(username: str, password: str, is_admin=False) -> int:
         raise AuthFailed("Ese usuario ya existe.")
     now = _now()
     with db.tx() as con:
-        cur = con.execute("INSERT INTO users (username, pw_hash, is_admin, created, pw_changed) VALUES (?,?,?,?,?)",
-                          (username, hash_password(password), 1 if is_admin else 0, now, now))
+        cur = con.execute("INSERT INTO users (username, pw_hash, is_admin, must_change, created, pw_changed) "
+                          "VALUES (?,?,?,?,?,?)",
+                          (username, hash_password(password), 1 if is_admin else 0, 1 if must_change else 0, now, now))
         return cur.lastrowid
 
 
@@ -84,7 +85,9 @@ def setup_first_user(username: str, password: str) -> int:
     with db.tx() as con:
         if con.execute("SELECT COUNT(*) FROM users").fetchone()[0]:
             raise AuthFailed("La app ya tiene un administrador.")
-    return create_user(username, password, is_admin=True)
+    uid = create_user(username, password, is_admin=True)
+    db.claim_unassigned(uid)  # los datos de antes de haber usuarios son del primer administrador
+    return uid
 
 
 def change_password(user_id: int, current: str, new: str, keep_token_hash: str | None):
@@ -93,9 +96,56 @@ def change_password(user_id: int, current: str, new: str, keep_token_hash: str |
         raise AuthFailed("La contraseña actual no es correcta.")
     check_password_strength(new, u["username"])
     with db.tx() as con:
-        con.execute("UPDATE users SET pw_hash=?, pw_changed=? WHERE id=?", (hash_password(new), _now(), user_id))
+        con.execute("UPDATE users SET pw_hash=?, pw_changed=?, must_change=0 WHERE id=?",
+                    (hash_password(new), _now(), user_id))
         # cerrar el resto de sesiones: si alguien conocía la contraseña anterior, pierde el acceso
         con.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?", (user_id, keep_token_hash or ""))
+
+
+# ---------- administración de usuarios ----------
+def list_users():
+    return db.rows(
+        "SELECT u.id, u.username, u.is_admin, u.must_change, u.created, "
+        "(SELECT MAX(last_seen) FROM sessions s WHERE s.user_id=u.id) last_seen, "
+        "(SELECT COUNT(*) FROM activities a WHERE a.user_id=u.id AND a.is_run=1) runs, "
+        "EXISTS(SELECT 1 FROM user_settings x WHERE x.user_id=u.id AND x.key='garmin_token') garmin "
+        "FROM users u ORDER BY u.id")
+
+
+def admin_reset_password(user_id: int, new_password: str):
+    u = db.one("SELECT username FROM users WHERE id=?", (user_id,))
+    if not u:
+        raise AuthFailed("El usuario no existe.")
+    check_password_strength(new_password, u["username"])
+    with db.tx() as con:
+        con.execute("UPDATE users SET pw_hash=?, pw_changed=?, must_change=1 WHERE id=?",
+                    (hash_password(new_password), _now(), user_id))
+        con.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+    _clear(f"u:{u['username'].lower()}")
+
+
+def set_admin(user_id: int, is_admin: bool, acting_user_id: int):
+    if not is_admin and _admins_except(user_id) == 0:
+        raise AuthFailed("Tiene que quedar al menos un administrador.")
+    if user_id == acting_user_id and not is_admin:
+        raise AuthFailed("No puedes quitarte a ti mismo el permiso de administrador.")
+    db.execute("UPDATE users SET is_admin=? WHERE id=?", (1 if is_admin else 0, user_id))
+
+
+def delete_user(user_id: int, acting_user_id: int):
+    if user_id == acting_user_id:
+        raise AuthFailed("No puedes eliminar tu propia cuenta.")
+    u = db.one("SELECT is_admin FROM users WHERE id=?", (user_id,))
+    if not u:
+        raise AuthFailed("El usuario no existe.")
+    if u["is_admin"] and _admins_except(user_id) == 0:
+        raise AuthFailed("Tiene que quedar al menos un administrador.")
+    db.delete_user_data(user_id)
+    db.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+
+def _admins_except(user_id: int) -> int:
+    return db.one("SELECT COUNT(*) n FROM users WHERE is_admin=1 AND id<>?", (user_id,))["n"]
 
 
 # ---------- intentos fallidos ----------
@@ -162,7 +212,7 @@ def session_user(token: str | None) -> dict | None:
     if not token:
         return None
     th = _hash_token(token)
-    s = db.one("SELECT s.*, u.username, u.is_admin FROM sessions s JOIN users u ON u.id=s.user_id "
+    s = db.one("SELECT s.*, u.username, u.is_admin, u.must_change FROM sessions s JOIN users u ON u.id=s.user_id "
                "WHERE s.token_hash=?", (th,))
     now = datetime.now()
     if not s or s["expires"] < _iso(now):
@@ -174,7 +224,7 @@ def session_user(token: str | None) -> dict | None:
         exp = _iso(now + timedelta(days=REMEMBER_DAYS)) if s["remember"] else s["expires"]
         db.execute("UPDATE sessions SET last_seen=?, expires=? WHERE token_hash=?", (_iso(now), exp, th))
     return {"id": s["user_id"], "username": s["username"], "is_admin": bool(s["is_admin"]),
-            "token_hash": th, "remember": bool(s["remember"])}
+            "must_change": bool(s["must_change"]), "token_hash": th, "remember": bool(s["remember"])}
 
 
 def end_session(token: str | None):

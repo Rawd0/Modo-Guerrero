@@ -46,6 +46,10 @@ async def session_auth(request: Request, call_next):
         request.state.user = user
         if not user and not path.startswith(PUBLIC_API):
             return JSONResponse({"detail": "Inicia sesión", "auth": True}, status_code=401)
+        if user and user["must_change"] and not path.startswith(PUBLIC_API) and path != "/api/account/password":
+            return JSONResponse({"detail": "Cambia tu contraseña para continuar", "must_change": True}, status_code=403)
+        if path.startswith("/api/admin/") and not (user and user["is_admin"]):
+            return JSONResponse({"detail": "Sólo para administradores"}, status_code=403)
     resp = await call_next(request)
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
@@ -63,8 +67,9 @@ def _set_cookie(request: Request, resp: Response, token: str, max_age):
 
 def _start_session(request: Request, user_id: int, remember: bool) -> JSONResponse:
     token, max_age = auth.new_session(user_id, remember, request.headers.get("user-agent", ""), _client_ip(request))
-    u = db.one("SELECT id, username, is_admin FROM users WHERE id=?", (user_id,))
-    resp = JSONResponse({"ok": True, "user": {"username": u["username"], "is_admin": bool(u["is_admin"])}})
+    u = db.one("SELECT id, username, is_admin, must_change FROM users WHERE id=?", (user_id,))
+    resp = JSONResponse({"ok": True, "user": {"username": u["username"], "is_admin": bool(u["is_admin"]),
+                                              "must_change": bool(u["must_change"])}})
     _set_cookie(request, resp, token, max_age)
     return resp
 
@@ -73,7 +78,7 @@ def _start_session(request: Request, user_id: int, remember: bool) -> JSONRespon
 def auth_me(request: Request):
     u = request.state.user
     return {"setup_required": auth.user_count() == 0,
-            "user": {"username": u["username"], "is_admin": u["is_admin"]} if u else None,
+            "user": {"username": u["username"], "is_admin": u["is_admin"], "must_change": u["must_change"]} if u else None,
             "version": VERSION}
 
 
@@ -137,36 +142,85 @@ def healthz():
     return {"ok": True}
 
 
-# ---------- estado y sincronización ----------
+# ---------- administración de usuarios ----------
+@app.get("/api/admin/users")
+def admin_users():
+    return auth.list_users()
+
+
+@app.post("/api/admin/users")
+def admin_create_user(payload: dict = Body(...)):
+    try:
+        uid = auth.create_user(payload.get("username", ""), payload.get("password", ""),
+                               is_admin=bool(payload.get("is_admin")), must_change=True)
+    except auth.AuthFailed as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "id": uid}
+
+
+@app.post("/api/admin/users/{user_id}/password")
+def admin_reset(user_id: int, payload: dict = Body(...)):
+    try:
+        auth.admin_reset_password(user_id, payload.get("password", ""))
+    except auth.AuthFailed as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/admin/users/{user_id}/admin")
+def admin_toggle(request: Request, user_id: int, payload: dict = Body(...)):
+    try:
+        auth.set_admin(user_id, bool(payload.get("is_admin")), request.state.user["id"])
+    except auth.AuthFailed as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete(request: Request, user_id: int):
+    try:
+        auth.delete_user(user_id, request.state.user["id"])
+    except auth.AuthFailed as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+# ---------- estado y sincronización (siempre del usuario de la sesión) ----------
+def _uid(request: Request) -> int:
+    return request.state.user["id"]
+
+
 @app.get("/api/status")
-def status():
-    counts = db.one("SELECT COUNT(*) total, SUM(is_run) runs, "
-                    "SUM(CASE WHEN is_run=1 AND fit_status='pending' THEN 1 ELSE 0 END) pending_fit "
-                    "FROM activities")
-    last_log = db.one("SELECT * FROM sync_log ORDER BY id DESC LIMIT 1")
+def status(request: Request):
+    uid = _uid(request)
+    counts = db.one("SELECT COUNT(*) total, COALESCE(SUM(is_run),0) runs, "
+                    "COALESCE(SUM(CASE WHEN is_run=1 AND fit_status='pending' THEN 1 ELSE 0 END),0) pending_fit "
+                    "FROM activities WHERE user_id=?", (uid,))
+    last_log = db.one("SELECT * FROM sync_log WHERE user_id=? ORDER BY id DESC LIMIT 1", (uid,))
     return {
         "app": APP_NAME, "version": VERSION,
-        "connected": garmin_auth.is_connected(),
-        "email": db.get_setting("garmin_email"),
-        "sync": sync.state, "last_log": last_log, "counts": counts,
-        "health_days": (db.one("SELECT COUNT(*) n FROM daily_health") or {}).get("n", 0),
+        "connected": garmin_auth.is_connected(uid),
+        "email": db.get_setting(uid, "garmin_email"),
+        "sync": sync.get_state(uid), "last_log": last_log, "counts": counts,
+        "health_days": db.one("SELECT COUNT(*) n FROM daily_health WHERE user_id=?", (uid,))["n"],
     }
 
 
 @app.post("/api/sync")
-def sync_now():
-    if not garmin_auth.is_connected():
+def sync_now(request: Request):
+    uid = _uid(request)
+    if not garmin_auth.is_connected(uid):
         raise HTTPException(400, "Conecta primero tu cuenta de Garmin")
-    sync.trigger()
+    sync.trigger(uid)
     return {"ok": True}
 
 
 @app.get("/api/sync/log")
-def sync_log():
-    return db.rows("SELECT * FROM sync_log ORDER BY id DESC LIMIT 30")
+def sync_log(request: Request):
+    return db.rows("SELECT * FROM sync_log WHERE user_id=? ORDER BY id DESC LIMIT 30", (_uid(request),))
 
 
-# ---------- autenticación Garmin ----------
+# ---------- cuenta de Garmin ----------
 def _auth_call(fn, *a):
     try:
         return fn(*a)
@@ -175,53 +229,57 @@ def _auth_call(fn, *a):
 
 
 @app.post("/api/garmin/login")
-def garmin_login(payload: dict = Body(...)):
+def garmin_login(request: Request, payload: dict = Body(...)):
+    uid = _uid(request)
     email, pwd = (payload.get("email") or "").strip(), payload.get("password") or ""
     if not email or not pwd:
         raise HTTPException(400, "Introduce correo y contraseña")
-    r = _auth_call(garmin_auth.start_login, email, pwd)
+    r = _auth_call(garmin_auth.start_login, uid, email, pwd)
     if r.get("ok"):
-        sync.trigger()
+        sync.trigger(uid)
     return r
 
 
 @app.post("/api/garmin/mfa")
-def garmin_mfa(payload: dict = Body(...)):
-    r = _auth_call(garmin_auth.finish_mfa, payload.get("code") or "")
-    sync.trigger()
+def garmin_mfa(request: Request, payload: dict = Body(...)):
+    uid = _uid(request)
+    r = _auth_call(garmin_auth.finish_mfa, uid, payload.get("code") or "")
+    sync.trigger(uid)
     return r
 
 
 @app.post("/api/garmin/logout")
-def garmin_logout():
-    garmin_auth.logout()
+def garmin_logout(request: Request):
+    garmin_auth.logout(_uid(request))
     return {"ok": True}
 
 
 # ---------- ajustes ----------
 @app.get("/api/settings")
-def get_settings():
-    return db.all_settings()
+def get_settings(request: Request):
+    return db.all_settings(_uid(request))
 
 
 @app.put("/api/settings")
-def put_settings(payload: dict = Body(...)):
+def put_settings(request: Request, payload: dict = Body(...)):
+    uid = _uid(request)
     for k, v in payload.items():
         if k in DEFAULT_SETTINGS:
-            db.set_setting(k, v)
-    return db.all_settings()
+            db.set_setting(uid, k, v)
+    return db.all_settings(uid)
 
 
 # ---------- datos ----------
 @app.get("/api/home")
-def home():
-    return stats.home()
+def home(request: Request):
+    return stats.home(_uid(request))
 
 
 @app.get("/api/activities")
-def activities(q: str = "", year: str = "", sport: str = "", min_km: float = 0, max_km: float = 0,
-               sort: str = "date", order: str = "desc", page: int = 1, size: int = 50):
-    where, params = ["is_run=1"], []
+def activities(request: Request, q: str = "", year: str = "", sport: str = "", min_km: float = 0,
+               max_km: float = 0, sort: str = "date", order: str = "desc", page: int = 1, size: int = 50):
+    uid = _uid(request)
+    where, params = ["user_id=?", "is_run=1"], [uid]
     if q:
         where.append("name LIKE ?")
         params.append(f"%{q}%")
@@ -246,23 +304,24 @@ def activities(q: str = "", year: str = "", sport: str = "", min_km: float = 0, 
     size = min(max(size, 1), 200)
     items = db.rows(f"SELECT {stats.RUN_COLS} FROM activities WHERE {w} ORDER BY {sort_col} {order} NULLS LAST "
                     f"LIMIT ? OFFSET ?", params + [size, (max(page, 1) - 1) * size])
-    years = [r["y"] for r in db.rows("SELECT DISTINCT substr(date,1,4) y FROM activities WHERE is_run=1 ORDER BY y DESC")]
-    sports = [r["sport"] for r in db.rows("SELECT DISTINCT sport FROM activities WHERE is_run=1")]
+    years = [r["y"] for r in db.rows("SELECT DISTINCT substr(date,1,4) y FROM activities WHERE user_id=? AND is_run=1 "
+                                     "ORDER BY y DESC", (uid,))]
+    sports = [r["sport"] for r in db.rows("SELECT DISTINCT sport FROM activities WHERE user_id=? AND is_run=1", (uid,))]
     return {"total": total, "items": items, "years": years, "sports": sports}
 
 
 @app.get("/api/activities/{aid}")
-def activity(aid: int):
-    a = db.one(f"SELECT {stats.RUN_COLS}, max_speed, elev_loss, start_lat, start_lon FROM activities WHERE id=?", (aid,))
+def activity(request: Request, aid: int):
+    uid = _uid(request)
+    a = db.one(f"SELECT {stats.RUN_COLS}, max_speed, elev_loss, start_lat, start_lon FROM activities "
+               "WHERE id=? AND user_id=?", (aid, uid))
     if not a:
         raise HTTPException(404, "Actividad no encontrada")
     st = db.load_stream(aid)
     efforts = db.rows("SELECT distance_m, time_s FROM best_efforts WHERE activity_id=? ORDER BY distance_m", (aid,))
-    # ¿es récord personal?
     for e in efforts:
-        best = db.one("SELECT MIN(time_s) m FROM best_efforts WHERE distance_m=?", (e["distance_m"],))
-        e["is_pr"] = best and abs(best["m"] - e["time_s"]) < 0.05
-    hr_rest, hr_max = metrics.hr_bounds()
+        e["is_pr"] = stats.is_personal_record(uid, e["distance_m"], e["time_s"])
+    hr_rest, hr_max = metrics.hr_bounds(uid)
     zones = None
     if st and any(st.get("hr") or []):
         # tiempo en 5 zonas por % de FC máxima
@@ -273,8 +332,7 @@ def activity(aid: int):
             h = st["hr"][k]
             if not h:
                 continue
-            frac = h / hr_max
-            z = sum(1 for b in bounds if frac >= b)
+            z = sum(1 for b in bounds if h / hr_max >= b)
             zt[z] += ta[k] - ta[k - 1]
         zones = {"seconds": [round(x) for x in zt], "hr_max": hr_max,
                  "limits": [round(b * hr_max) for b in bounds]}
@@ -288,37 +346,40 @@ def activity(aid: int):
 
 
 @app.get("/api/records")
-def records():
-    return stats.records()
+def records(request: Request):
+    return stats.records(_uid(request))
 
 
 @app.get("/api/stats")
-def get_stats(group: str = "month"):
+def get_stats(request: Request, group: str = "month"):
     if group not in ("week", "month", "year"):
         group = "month"
-    return stats.stats(group)
+    return stats.stats(_uid(request), group)
 
 
 @app.get("/api/health")
-def get_health(days: int = 90):
-    return stats.health(min(max(days, 7), 3650))
+def get_health(request: Request, days: int = 90):
+    return stats.health(_uid(request), min(max(days, 7), 3650))
 
 
 @app.get("/api/fitness")
-def get_fitness(days: int = 180):
-    snaps = db.rows("SELECT date, vo2max FROM snapshots WHERE vo2max IS NOT NULL ORDER BY date")
-    vo2 = db.rows("SELECT date, MAX(vo2max) vo2max FROM activities WHERE vo2max IS NOT NULL GROUP BY date ORDER BY date")
-    return {"series": metrics.fitness_series(min(max(days, 14), 3650)), "vo2": vo2 or snaps,
-            "snapshot": stats.latest_snapshot()}
+def get_fitness(request: Request, days: int = 180):
+    uid = _uid(request)
+    snaps = db.rows("SELECT date, vo2max FROM snapshots WHERE user_id=? AND vo2max IS NOT NULL ORDER BY date", (uid,))
+    vo2 = db.rows("SELECT date, MAX(vo2max) vo2max FROM activities WHERE user_id=? AND vo2max IS NOT NULL "
+                  "GROUP BY date ORDER BY date", (uid,))
+    return {"series": metrics.fitness_series(uid, min(max(days, 14), 3650)), "vo2": vo2 or snaps,
+            "snapshot": stats.latest_snapshot(uid)}
 
 
 @app.post("/api/upload")
-async def upload(files: list[UploadFile] = File(...)):
+async def upload(request: Request, files: list[UploadFile] = File(...)):
+    uid = _uid(request)
     results = []
     for f in files:
         blob = await f.read()
         try:
-            r = sync.import_fit(blob)
+            r = sync.import_fit(uid, blob)
         except Exception:  # noqa: BLE001
             r = [{"ok": False, "error": "No es un archivo .FIT válido o está dañado"}]
         results.append({"file": f.filename, "results": r})

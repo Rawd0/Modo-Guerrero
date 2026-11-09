@@ -1,5 +1,7 @@
-Personalización de la apariencia.
+Varios usuarios en la misma app.
 
-- Nueva tarjeta «Apariencia» en Ajustes: tema Automático (sigue al dispositivo), Claro, Oscuro o Negro (ideal para pantallas OLED).
-- Color principal a elegir entre 8 colores o uno personalizado. Se aplica a botones, gráficas, mapas y barras de progreso.
-- La elección se guarda en tu cuenta y se aplica en todos tus dispositivos, sin parpadeo al cargar.
+- Nuevo panel «Usuarios» en Ajustes (sólo administradores): crear usuarios con contraseña temporal, restablecer contraseñas, dar o quitar permisos de administrador y eliminar usuarios.
+- Cada usuario tiene sus propios datos (carreras, salud, récords, forma), su propia cuenta de Garmin, sus objetivos, su inicio y su tema. Nadie ve los datos de otro, tampoco el administrador.
+- Al entrar por primera vez con una contraseña temporal, hay que elegir una propia.
+- La sincronización con Garmin atiende a los usuarios por turnos para no saturar a Garmin.
+- Al actualizar, todos tus datos y ajustes actuales pasan automáticamente a tu cuenta de administrador.

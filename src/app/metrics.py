@@ -135,24 +135,26 @@ def activity_load(a, hr_rest, hr_max):
     return 0.0
 
 
-def hr_bounds():
-    hr_max = db.get_setting("hr_max")
-    hr_rest = db.get_setting("hr_rest")
+def hr_bounds(uid: int):
+    hr_max = db.get_setting(uid, "hr_max")
+    hr_rest = db.get_setting(uid, "hr_rest")
     if not hr_max:
-        r = db.one("SELECT MAX(max_hr) m FROM activities WHERE is_run=1")
+        r = db.one("SELECT MAX(max_hr) m FROM activities WHERE user_id=? AND is_run=1", (uid,))
         hr_max = r["m"] if r and r["m"] else 190
     if not hr_rest:
-        r = db.one("SELECT AVG(rhr) m FROM (SELECT rhr FROM daily_health WHERE rhr IS NOT NULL ORDER BY date DESC LIMIT 30)")
+        r = db.one("SELECT AVG(rhr) m FROM (SELECT rhr FROM daily_health WHERE user_id=? AND rhr IS NOT NULL "
+                   "ORDER BY date DESC LIMIT 30)", (uid,))
         hr_rest = r["m"] if r and r["m"] else 55
     return hr_rest, hr_max
 
 
-def fitness_series(days=180):
+def fitness_series(uid: int, days=180):
     """Serie diaria de carga, CTL (42 d), ATL (7 d) y TSB, usando todas las actividades."""
-    acts = db.rows("SELECT date, training_load, moving_s, duration_s, avg_hr FROM activities WHERE date IS NOT NULL ORDER BY date")
+    acts = db.rows("SELECT date, training_load, moving_s, duration_s, avg_hr FROM activities "
+                   "WHERE user_id=? AND date IS NOT NULL ORDER BY date", (uid,))
     if not acts:
         return []
-    hr_rest, hr_max = hr_bounds()
+    hr_rest, hr_max = hr_bounds(uid)
     daily = {}
     for a in acts:
         daily[a["date"]] = daily.get(a["date"], 0) + activity_load(a, hr_rest, hr_max)

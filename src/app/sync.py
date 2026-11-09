@@ -12,17 +12,16 @@ from .config import GARMIN_PAUSE
 
 log = logging.getLogger("guerrero.sync")
 
-state = {
-    "running": False,
-    "phase": "",
-    "last_start": None,
-    "last_end": None,
-    "last_ok": None,
-    "last_error": None,
-    "next_run": None,
-}
-_trigger = threading.Event()
-_run_lock = threading.Lock()
+# estado de la sincronización de cada usuario de la app
+_states: dict[int, dict] = {}
+_due: set[int] = set()          # usuarios con "sincronizar ahora" pendiente
+_wake = threading.Event()
+_run_lock = threading.Lock()    # sólo una sincronización a la vez (por turnos)
+
+
+def get_state(uid: int) -> dict:
+    return _states.setdefault(uid, {"running": False, "phase": "", "last_start": None, "last_end": None,
+                                    "last_ok": None, "last_error": None, "next_run": None, "queued": False})
 
 
 # ---------- utilidades ----------
@@ -100,17 +99,20 @@ def map_activity(a: dict) -> dict:
     }
 
 
-def save_activity(row: dict):
-    existing = db.one("SELECT fit_status FROM activities WHERE id=?", (row["id"],))
+def save_activity(uid: int, row: dict):
+    existing = db.one("SELECT fit_status, user_id FROM activities WHERE id=?", (row["id"],))
+    if existing and existing["user_id"] not in (uid, 0):
+        return  # la misma cuenta de Garmin conectada en otro usuario: no se mezclan datos
+    row = dict(row, user_id=uid)
     if existing:
         row = dict(row)
         row.pop("fit_status", None)  # no reiniciar el estado del FIT
     db.upsert("activities", row, "id")
     if not existing:
-        _merge_manual_duplicate(row)
+        _merge_manual_duplicate(uid, row)
 
 
-def _merge_manual_duplicate(row):
+def _merge_manual_duplicate(uid, row):
     """Si esta carrera se importó antes a mano desde un .FIT, pasa su detalle a la de Garmin."""
     if not row.get("start_utc"):
         return
@@ -120,7 +122,8 @@ def _merge_manual_duplicate(row):
         return
     lo = (start - timedelta(seconds=60)).strftime("%Y-%m-%d %H:%M:%S")
     hi = (start + timedelta(seconds=60)).strftime("%Y-%m-%d %H:%M:%S")
-    dup = db.one("SELECT id FROM activities WHERE source='fit' AND start_utc BETWEEN ? AND ?", (lo, hi))
+    dup = db.one("SELECT id FROM activities WHERE user_id=? AND source='fit' AND start_utc BETWEEN ? AND ?",
+                 (uid, lo, hi))
     if not dup:
         return
     with db.tx() as con:
@@ -131,9 +134,9 @@ def _merge_manual_duplicate(row):
 
 
 # ---------- fases de la sincronización ----------
-def sync_activities(g):
+def sync_activities(uid, g, state):
     state["phase"] = "Actividades"
-    known = {r["id"] for r in db.rows("SELECT id FROM activities WHERE source='garmin'")}
+    known = {r["id"] for r in db.rows("SELECT id FROM activities WHERE user_id=? AND source='garmin'", (uid,))}
     first_run = not known
     start, page = 0, 100
     new = 0
@@ -148,7 +151,7 @@ def sync_activities(g):
             if row["id"] not in known:
                 page_new += 1
                 new += 1
-            save_activity(row)
+            save_activity(uid, row)
         state["phase"] = f"Actividades ({new} nuevas)"
         # en sincronizaciones normales paramos al llegar a actividades ya conocidas
         if not first_run and page_new == 0:
@@ -159,7 +162,7 @@ def sync_activities(g):
     return new
 
 
-def health_row(day: str, summary, sleep, hrv, readiness) -> dict:
+def health_row(uid: int, day: str, summary, sleep, hrv, readiness) -> dict:
     dto = (sleep or {}).get("dailySleepDTO") or {}
     scores = dto.get("sleepScores") or {}
     hs = (hrv or {}).get("hrvSummary") or {}
@@ -167,6 +170,7 @@ def health_row(day: str, summary, sleep, hrv, readiness) -> dict:
     rd = readiness[0] if isinstance(readiness, list) and readiness else (readiness or {})
     s = summary or {}
     return {
+        "user_id": uid,
         "date": day,
         "sleep_s": dto.get("sleepTimeSeconds"),
         "sleep_score": (scores.get("overall") or {}).get("value"),
@@ -191,14 +195,14 @@ def health_row(day: str, summary, sleep, hrv, readiness) -> dict:
     }
 
 
-def sync_health(g):
-    last = db.one("SELECT MAX(date) d FROM daily_health")
+def sync_health(uid, g, state):
+    last = db.one("SELECT MAX(date) d FROM daily_health WHERE user_id=?", (uid,))
     today = date.today()
     if last and last["d"]:
         # repetimos los 2 últimos días: el sueño y el Body Battery se completan después
         start = date.fromisoformat(last["d"]) - timedelta(days=1)
     else:
-        start = today - timedelta(days=int(db.get_setting("health_backfill_days")) - 1)
+        start = today - timedelta(days=int(db.get_setting(uid, "health_backfill_days")) - 1)
     days = (today - start).days + 1
     for i in range(days):
         day = (start + timedelta(days=i)).isoformat()
@@ -207,11 +211,11 @@ def sync_health(g):
         sleep = _call(g.get_sleep_data, day)
         hrv = _call(g.get_hrv_data, day)
         readiness = _call(g.get_training_readiness, day)
-        db.upsert("daily_health", health_row(day, summary, sleep, hrv, readiness), "date")
+        db.upsert("daily_health", health_row(uid, day, summary, sleep, hrv, readiness), ("user_id", "date"))
     return days
 
 
-def sync_snapshot(g):
+def sync_snapshot(uid, g, state):
     state["phase"] = "Estado de forma"
     day = date.today().isoformat()
     ts = _call(g.get_training_status, day) or {}
@@ -223,6 +227,7 @@ def sync_snapshot(g):
         or find_key(ts, "vo2MaxPreciseValue") or find_key(ts, "vo2MaxValue")
     acute = find_key(ts, "acuteTrainingLoadDTO") or {}
     row = {
+        "user_id": uid,
         "date": day,
         "vo2max": vo2,
         "training_status": find_key(ts, "trainingStatus"),
@@ -237,7 +242,7 @@ def sync_snapshot(g):
         "raw": json.dumps({"training_status": ts, "max_metrics": mm, "race_predictions": rp}),
     }
     if any(row[k] is not None for k in ("vo2max", "training_status", "race_5k")):
-        db.upsert("snapshots", row, "date")
+        db.upsert("snapshots", row, ("user_id", "date"))
 
 
 def store_stream(activity_id, stream):
@@ -245,10 +250,10 @@ def store_stream(activity_id, stream):
     metrics.store_best_efforts(activity_id, stream)
 
 
-def sync_fit_files(g):
-    limit = int(db.get_setting("fit_per_run"))
-    pending = db.rows("SELECT id FROM activities WHERE is_run=1 AND fit_status='pending' "
-                      "AND source='garmin' ORDER BY date DESC LIMIT ?", (limit,))
+def sync_fit_files(uid, g, state):
+    limit = int(db.get_setting(uid, "fit_per_run"))
+    pending = db.rows("SELECT id FROM activities WHERE user_id=? AND is_run=1 AND fit_status='pending' "
+                      "AND source='garmin' ORDER BY date DESC LIMIT ?", (uid, limit))
     done = 0
     for i, r in enumerate(pending):
         state["phase"] = f"Detalle de carreras {i + 1}/{len(pending)}"
@@ -271,55 +276,68 @@ def sync_fit_files(g):
 
 
 # ---------- orquestación ----------
-def run_sync():
-    if not _run_lock.acquire(blocking=False):
-        return
-    state.update(running=True, last_start=_now(), last_error=None, phase="Conectando")
-    log_id = None
-    with db.tx() as con:
-        cur = con.execute("INSERT INTO sync_log (started, status) VALUES (?, 'running')", (state["last_start"],))
-        log_id = cur.lastrowid
-    msg, status = "", "ok"
-    try:
-        g = garmin_auth.get_client()
-        new = sync_activities(g)
-        days = sync_health(g)
-        sync_snapshot(g)
-        fits = sync_fit_files(g)
-        garmin_auth.persist_refreshed(g)
-        msg = f"{new} actividades nuevas, {days} días de salud, {fits} detalles descargados"
-        state["last_ok"] = _now()
-    except garmin_auth.AuthError as e:
-        status, msg = "auth", str(e)
-    except GarminConnectTooManyRequestsError:
-        status, msg = "rate", "Garmin limita las peticiones; se reintentará en la próxima sincronización."
-    except Exception as e:  # noqa: BLE001
-        log.exception("Sync falló")
-        status, msg = "error", f"Error: {e}"
-    finally:
-        state.update(running=False, phase="", last_end=_now())
-        if status != "ok":
-            state["last_error"] = msg
-        db.execute("UPDATE sync_log SET finished=?, status=?, message=? WHERE id=?",
-                   (state["last_end"], status, msg, log_id))
-        _run_lock.release()
+def run_sync(uid: int):
+    state = get_state(uid)
+    with _run_lock:
+        state.update(running=True, queued=False, last_start=_now(), last_error=None, phase="Conectando")
+        with db.tx() as con:
+            cur = con.execute("INSERT INTO sync_log (user_id, started, status) VALUES (?, ?, 'running')",
+                              (uid, state["last_start"]))
+            log_id = cur.lastrowid
+        msg, status = "", "ok"
+        try:
+            g = garmin_auth.get_client(uid)
+            new = sync_activities(uid, g, state)
+            days = sync_health(uid, g, state)
+            sync_snapshot(uid, g, state)
+            fits = sync_fit_files(uid, g, state)
+            garmin_auth.persist_refreshed(uid, g)
+            msg = f"{new} actividades nuevas, {days} días de salud, {fits} detalles descargados"
+            state["last_ok"] = _now()
+        except garmin_auth.AuthError as e:
+            status, msg = "auth", str(e)
+        except GarminConnectTooManyRequestsError:
+            status, msg = "rate", "Garmin limita las peticiones; se reintentará en la próxima sincronización."
+        except Exception as e:  # noqa: BLE001
+            log.exception("Sync del usuario %s falló", uid)
+            status, msg = "error", f"Error: {e}"
+        finally:
+            state.update(running=False, phase="", last_end=_now())
+            if status != "ok":
+                state["last_error"] = msg
+            db.execute("UPDATE sync_log SET finished=?, status=?, message=? WHERE id=?",
+                       (state["last_end"], status, msg, log_id))
+        # pausa entre usuarios para no encadenar peticiones a Garmin
+        time.sleep(GARMIN_PAUSE * 5)
 
 
-def trigger():
-    _trigger.set()
+def trigger(uid: int):
+    get_state(uid)["queued"] = True
+    _due.add(uid)
+    _wake.set()
+
+
+def _connected_users():
+    return [r["id"] for r in db.rows("SELECT id FROM users ORDER BY id") if garmin_auth.is_connected(r["id"])]
 
 
 def scheduler_loop():
-    """Hilo en segundo plano: sincroniza cada `sync_interval_min` minutos."""
+    """Hilo en segundo plano: atiende a los usuarios por turnos, cada uno con su intervalo."""
     time.sleep(5)
     while True:
-        interval = max(15, int(db.get_setting("sync_interval_min") or 60))
-        if garmin_auth.is_connected():
-            run_sync()
-        nxt = datetime.now() + timedelta(minutes=interval)
-        state["next_run"] = nxt.isoformat(timespec="minutes")
-        _trigger.wait(timeout=interval * 60)
-        _trigger.clear()
+        now = datetime.now()
+        for uid in _connected_users():
+            st = get_state(uid)
+            due = uid in _due or not st["next_run"] or st["next_run"] <= now.isoformat(timespec="minutes")
+            if not due:
+                continue
+            _due.discard(uid)
+            run_sync(uid)
+            interval = max(15, int(db.get_setting(uid, "sync_interval_min") or 60))
+            st["next_run"] = (datetime.now() + timedelta(minutes=interval)).isoformat(timespec="minutes")
+            now = datetime.now()
+        _wake.wait(timeout=30)
+        _wake.clear()
 
 
 def start_scheduler():
@@ -331,7 +349,7 @@ def _now():
 
 
 # ---------- importación manual de .FIT ----------
-def import_fit(blob: bytes) -> list[dict]:
+def import_fit(uid: int, blob: bytes) -> list[dict]:
     results = []
     for data in fitparse.extract_fit_bytes(blob):
         parsed = fitparse.parse_fit(data)
@@ -343,11 +361,13 @@ def import_fit(blob: bytes) -> list[dict]:
         start = datetime.strptime(s["start_utc"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
         lo = (start - timedelta(seconds=60)).strftime("%Y-%m-%d %H:%M:%S")
         hi = (start + timedelta(seconds=60)).strftime("%Y-%m-%d %H:%M:%S")
-        match = db.one("SELECT id FROM activities WHERE start_utc BETWEEN ? AND ?", (lo, hi))
+        match = db.one("SELECT id FROM activities WHERE user_id=? AND start_utc BETWEEN ? AND ?", (uid, lo, hi))
         if match:
             aid = match["id"]
         else:
             aid = -int(start.timestamp())
+            while db.one("SELECT 1 FROM activities WHERE id=?", (aid,)):
+                aid -= 1  # otro usuario importó una actividad a la misma hora
             local = start.astimezone()
             sport = s["sport"].lower()
             sub = s["sub_sport"].lower()
@@ -355,7 +375,7 @@ def import_fit(blob: bytes) -> list[dict]:
             if sport == "running" and sub in ("treadmill", "trail", "track"):
                 tkey = f"{sub}_running"
             db.upsert("activities", {
-                "id": aid, "name": f"Carrera importada {local:%d/%m/%Y}" if sport == "running" else f"{sport} importado",
+                "id": aid, "user_id": uid, "name": f"Carrera importada {local:%d/%m/%Y}" if sport == "running" else f"{sport} importado",
                 "sport": tkey, "is_run": 1 if sport == "running" else 0,
                 "start_local": local.strftime("%Y-%m-%d %H:%M:%S"), "start_utc": s["start_utc"],
                 "date": local.strftime("%Y-%m-%d"),

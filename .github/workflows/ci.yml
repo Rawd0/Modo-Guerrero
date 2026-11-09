@@ -48,6 +48,17 @@ jobs:
           done
           id=$(curl -fs -b jar localhost:8080/api/activities | python -c "import sys,json;print(json.load(sys.stdin)['items'][0]['id'])")
           curl -fs -b jar -o /dev/null "localhost:8080/api/activities/$id"
+          # un segundo usuario no ve los datos del primero
+          curl -fs -b jar -H "$H" -H "Content-Type: application/json" \
+            -d '{"username":"ci-otro","password":"temporal-de-prueba"}' localhost:8080/api/admin/users
+          curl -fs -c jar2 -H "$H" -H "Content-Type: application/json" \
+            -d '{"username":"ci-otro","password":"temporal-de-prueba"}' localhost:8080/api/auth/login
+          test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' localhost:8080/api/home)" = "403" || { echo "No exige cambiar la contraseña temporal"; exit 1; }
+          curl -fs -b jar2 -H "$H" -H "Content-Type: application/json" \
+            -d '{"current":"temporal-de-prueba","new":"la-de-ci-otro-propia"}' localhost:8080/api/account/password
+          test "$(curl -fs -b jar2 localhost:8080/api/activities | python -c "import sys,json;print(json.load(sys.stdin)['total'])")" = "0" || { echo "El segundo usuario ve datos ajenos"; exit 1; }
+          test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' localhost:8080/api/activities/$id)" = "404" || { echo "El segundo usuario abre una carrera ajena"; exit 1; }
+          test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' localhost:8080/api/admin/users)" = "403" || { echo "Un usuario normal entra en la administración"; exit 1; }
           # sin la cabecera anti-CSRF, las escrituras se rechazan
           test "$(curl -s -b jar -o /dev/null -w '%{http_code}' -X POST localhost:8080/api/sync)" = "403" || { echo "Falta protección CSRF"; exit 1; }
           curl -fs localhost:8080/ | grep -q "vci" || { echo "La versión no aparece en la página"; exit 1; }

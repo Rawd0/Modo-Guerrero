@@ -1,41 +1,44 @@
 # Hoja de ruta
 
-Mejoras previstas para próximas versiones. No están en orden estricto.
+Mejoras previstas para próximas versiones, en el orden en que pensamos abordarlas.
 
-## Varios usuarios en la misma instalación
+## Hecho
 
-Que varias personas puedan usar la misma app en el mismo servidor, cada una con su cuenta
-de Garmin y sus datos separados.
+- **0.2.0** Inicio de sesión propio (sin la contraseña de Umbrel), recordar dispositivo 90 días.
+- **0.3.0** Tema (automático, claro, oscuro, negro) y color principal personalizables.
+- **0.4.0** Varios usuarios en la misma instalación: panel de administración, datos, cuenta de
+  Garmin y ajustes separados por usuario, sincronización por turnos.
 
-Puntos a resolver:
+## Próximo paquete: análisis de carrera
 
-- ~~**Inicio de sesión propio en la app.**~~ Hecho en la 0.2.0 (usuarios, sesiones, recordar dispositivo).
-- **Un administrador** que crea, edita y elimina usuarios (el primer usuario ya se crea al arrancar
-  la app por primera vez).
-- **Datos separados por usuario.** Columna `user_id` en actividades, detalle de carreras,
-  mejores esfuerzos, salud diaria, estado de forma, ajustes y registro de sincronización.
-  Cada consulta filtra siempre por el usuario de la sesión.
-- **Cuenta de Garmin por usuario**, con su propio token cifrado y su propio flujo de verificación
-  en dos pasos.
-- **Ajustes por usuario:** objetivos, FC máxima y en reposo, widgets del inicio.
-- **Sincronización:** el programador recorre los usuarios uno a uno, con pausas, para no
-  multiplicar las peticiones a Garmin a la vez.
-- **Migración:** los datos actuales pasan a pertenecer al primer usuario sin perder nada.
-- **Privacidad:** ningún usuario puede ver los datos de otro, tampoco el administrador salvo que
-  se decida lo contrario.
+Inspirado en Elevate, Runalyze e intervals.icu.
 
-## Face ID con passkeys
+- **Progresión anual acumulada** (Elevate): kilómetros acumulados de cada año superpuestos día a
+  día, para ver si vas por delante o por detrás de otros años. También para tiempo y desnivel.
+- **Ritmo ajustado a la pendiente (GAP)** (Elevate): ritmo equivalente en llano para cada carrera,
+  gráfica y parcial, de modo que una tirada con cuestas se pueda comparar con una llana.
+- **Kilometraje de zapatillas** (Runalyze, intervals.icu): dar de alta cada par, asignarlo a las
+  carreras (con un par por defecto) y avisar cuando se acerca al límite de km.
+- **Curva de ritmo** (intervals.icu): tu mejor ritmo sostenido para cada duración (1 min a 3 h),
+  histórica y de los últimos 90 días, para ver en qué rangos has mejorado.
+- **Monotonía y tensión semanal** (Runalyze): monotonía = carga media diaria / desviación típica de
+  la carga de la semana; tensión = carga semanal × monotonía. Aviso cuando la tensión es alta o el
+  entrenamiento es demasiado uniforme, junto a la forma (TSB) en la página de Forma y como widget.
 
-Iniciar sesión con Face ID / huella mediante passkeys (WebAuthn). Requiere entrar por HTTPS con un
-nombre de dominio: la opción prevista son los certificados HTTPS de Tailscale
-(`https://<servidor>.<red>.ts.net`). La contraseña quedaría como respaldo.
+## Más adelante
 
-## Otras mejoras pendientes
-
-- **Botón «No me llega el código»** en la verificación en dos pasos: mostrar por dónde dice Garmin
-  que ha enviado el código y reintentar por el método web, que pide explícitamente el envío.
+- **Face ID con passkeys**: iniciar sesión con Face ID / huella mediante WebAuthn. Requiere entrar
+  por HTTPS con un nombre de dominio (certificados HTTPS de Tailscale:
+  `https://<servidor>.<red>.ts.net`). La contraseña quedaría como respaldo.
+- **Zonas e historial del atleta** (Elevate): FC máxima, de reposo y umbral con fecha, para que las
+  carreras antiguas se analicen con los valores que tenías entonces.
+- **Predicción de carrera según tu forma** (Runalyze), comparada con la de Garmin.
+- **Botón «No me llega el código»** en la verificación en dos pasos de Garmin: mostrar por dónde dice
+  Garmin que ha enviado el código y reintentar por el método web, que pide explícitamente el envío.
 - **Strava** como fuente complementaria (segmentos, kudos) o alternativa a Garmin.
 - **Inicio con cuadrícula libre:** widgets redimensionables y nuevos widgets (objetivos, calendario
-  del mes, comparativa con el año anterior, sueño frente a rendimiento).
+  del mes, sueño frente a rendimiento).
+- **Comparar dos periodos** lado a lado (intervals.icu).
+- **Rutas repetidas** detectadas automáticamente y tu evolución en ellas (intervals.icu).
 - **Preguntas en lenguaje natural** sobre tus datos usando un modelo local (Ollama).
 - **Objetivos y preparación de carreras:** fecha de la carrera, plan y seguimiento.
