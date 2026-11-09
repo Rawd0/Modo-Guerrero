@@ -67,7 +67,7 @@ button, input, select { font: inherit; color: inherit; }
 .wordmark { display: flex; flex-direction: column; line-height: 1; }
 .wm-top { font-size: 9px; font-weight: 600; letter-spacing: .32em; color: var(--accent); margin-bottom: 2px; }
 .wm-main { font-size: 18px; font-weight: 900; letter-spacing: .06em; color: var(--text); }
-nav { display: flex; gap: 2px; flex: 1; overflow-x: auto; scrollbar-width: none; }
+nav { display: flex; gap: 2px; flex: 1; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding: 3px 2px; -webkit-overflow-scrolling: touch; }
 nav::-webkit-scrollbar { display: none; }
 nav a { padding: 7px 12px; border-radius: 9px; color: var(--muted); font-weight: 500; white-space: nowrap; }
 nav a:hover { color: var(--text); background: var(--card); }
@@ -290,8 +290,10 @@ body { padding-top: var(--sat); padding-bottom: env(safe-area-inset-bottom); }
   .topbar { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
   main { padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
 }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 /* como app instalada: sin rebote del fondo ni resaltado gris al tocar */
 @media (display-mode: standalone) {
+  .topbar { padding-top: 14px; padding-bottom: 10px; }
   html, body { overscroll-behavior-y: none; }
   a, button { -webkit-tap-highlight-color: transparent; }
   .standalone-only { display: inline-flex !important; }

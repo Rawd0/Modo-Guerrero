@@ -245,7 +245,9 @@ def _uid(request: Request) -> int:
 def status(request: Request):
     uid = _uid(request)
     counts = db.one("SELECT COUNT(*) total, COALESCE(SUM(is_run),0) runs, "
-                    "COALESCE(SUM(CASE WHEN is_run=1 AND fit_status='pending' THEN 1 ELSE 0 END),0) pending_fit "
+                    "COALESCE(SUM(CASE WHEN is_run=1 AND fit_status='pending' THEN 1 ELSE 0 END),0) pending_fit, "
+                    "COALESCE(SUM(CASE WHEN is_run=1 AND fit_status='ok' THEN 1 ELSE 0 END),0) fit_ok, "
+                    "COALESCE(SUM(CASE WHEN is_run=1 AND fit_status='error' THEN 1 ELSE 0 END),0) fit_error "
                     "FROM activities WHERE user_id=?", (uid,))
     last_log = db.one("SELECT * FROM sync_log WHERE user_id=? ORDER BY id DESC LIMIT 1", (uid,))
     return {
@@ -255,6 +257,17 @@ def status(request: Request):
         "sync": sync.get_state(uid), "last_log": last_log, "counts": counts,
         "health_days": db.one("SELECT COUNT(*) n FROM daily_health WHERE user_id=?", (uid,))["n"],
     }
+
+
+@app.post("/api/sync/retry-details")
+def retry_details(request: Request):
+    """Vuelve a intentar descargar el detalle de las carreras en las que falló."""
+    uid = _uid(request)
+    n = db.one("SELECT COUNT(*) n FROM activities WHERE user_id=? AND is_run=1 AND fit_status='error' AND source='garmin'", (uid,))["n"]
+    db.execute("UPDATE activities SET fit_status='pending' WHERE user_id=? AND is_run=1 AND fit_status='error' AND source='garmin'", (uid,))
+    if n and garmin_auth.is_connected(uid):
+        sync.trigger(uid)
+    return {"ok": True, "retried": n}
 
 
 @app.post("/api/sync")

@@ -1449,8 +1449,10 @@ route("ajustes", async (view) => {
       </div>
       <div class="card"><h3>Sincronización</h3>
         <div class="muted" style="font-size:13px;margin-bottom:12px">
-          ${int(st.counts.runs)} carreras de ${int(st.counts.total)} actividades · ${int(st.health_days)} días de salud<br>
-          ${st.counts.pending_fit ? `${int(st.counts.pending_fit)} carreras pendientes de descargar el detalle (se hace poco a poco para no saturar a Garmin)<br>` : ""}
+          <b>${int(st.counts.total)}</b> actividades: <b>${int(st.counts.runs)}</b> de carrera${st.counts.total > st.counts.runs ? ` y ${int(st.counts.total - st.counts.runs)} de otros deportes (se guardan, pero sólo se analizan las de carrera)` : ""} · ${int(st.health_days)} días de salud<br>
+          Detalle (GPS, pulso, parciales) de <b>${int(st.counts.fit_ok)}</b> de ${int(st.counts.runs)} carreras
+          ${st.counts.pending_fit ? ` · <b>${int(st.counts.pending_fit)}</b> pendientes, se descargan ${int(set.fit_per_run)} en cada sincronización para no saturar a Garmin` : !st.counts.fit_error ? ` · <span class="tag good">Todo al día</span>` : ""}<br>
+          ${st.counts.fit_error ? `<span class="tag warn" style="white-space:normal">${int(st.counts.fit_error)} sin detalle: Garmin no lo devolvió (suele pasar con actividades añadidas a mano o en cinta sin reloj)</span> <button class="btn small ghost" id="retryFit">Reintentar</button><br>` : ""}
           ${st.sync.next_run ? `Próxima: ${esc(st.sync.next_run.replace("T", " "))}` : ""}
         </div>
         <div class="form-grid">
@@ -1537,6 +1539,10 @@ route("ajustes", async (view) => {
   const num = (id) => { const v = $(id).value; return v === "" ? null : +v; };
   $("#saveSync").onclick = async () => { await api("/api/settings", { method: "PUT", body: { sync_interval_min: num("#s_int") || 60, fit_per_run: num("#s_fit") || 40, health_backfill_days: num("#s_back") || 180 } }); toast("Guardado. El nuevo intervalo se aplica tras la próxima sincronización."); };
   $("#saveGoals").onclick = async () => { await api("/api/settings", { method: "PUT", body: { weekly_goal_km: num("#g_w"), monthly_goal_km: num("#g_m"), yearly_goal_km: num("#g_y"), hr_max: num("#h_max"), hr_rest: num("#h_rest") } }); toast("Guardado"); };
+  if ($("#retryFit")) $("#retryFit").onclick = async () => {
+    try { const r = await api("/api/sync/retry-details", { method: "POST" }); toast(`Se reintentará el detalle de ${r.retried} carreras`); setTimeout(rerender, 1200); }
+    catch (e) { toast(e.message, true); }
+  };
   $("#syncNow").onclick = async () => { try { await api("/api/sync", { method: "POST" }); toast("Sincronización iniciada"); setTimeout(refreshStatus, 800); } catch (e) { toast(e.message, true); } };
   // subida de FIT
   const drop = $("#drop"), file = $("#file");
