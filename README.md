@@ -1,9 +1,10 @@
 # Modo Guerrero
 
 Panel autoalojado de carrera a pie con tus datos de Garmin Connect, pensado para Umbrel:
-carreras con mapa, gráficas y parciales, récords personales, forma y carga (CTL/ATL/TSB),
-VO2max, sueño, VFC, pulso en reposo, Body Battery y estrés, con una página de inicio
-personalizable mediante widgets.
+carreras con mapa, gráficas y parciales, ritmo ajustado a la pendiente (GAP), récords personales
+y curva de ritmo, forma y carga (CTL/ATL/TSB), monotonía y tensión semanal, progresión anual
+año contra año, kilometraje de zapatillas, VO2max, sueño, VFC, pulso en reposo, Body Battery y
+estrés, con una página de inicio personalizable mediante widgets.
 
 Este repositorio es a la vez **el código de la app** y **una tienda comunitaria de Umbrel**.
 

@@ -36,8 +36,13 @@ DEFAULT_SETTINGS = {
         {"id": "month", "visible": True, "wide": False},
         {"id": "predictions", "visible": True, "wide": False},
         {"id": "weeks_chart", "visible": True, "wide": True},
+        {"id": "year_progress", "visible": True, "wide": True},
+        {"id": "shoes", "visible": True, "wide": False},
     ],
 }
+
+# Duraciones de la curva de ritmo (segundos)
+PACE_CURVE_DURATIONS = [30, 60, 120, 180, 300, 600, 900, 1200, 1800, 2700, 3600, 5400, 7200, 10800, 14400]
 
 # Distancias para mejores esfuerzos / récords (metros, etiqueta)
 RECORD_DISTANCES = [

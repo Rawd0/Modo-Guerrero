@@ -264,6 +264,8 @@ const WIDGETS = {
   records: { title: "Récords personales", render: wRecords },
   predictions: { title: "Predicciones de carrera", render: wPredictions },
   weeks_chart: { title: "Kilómetros por semana", render: wWeeksChart },
+  year_progress: { title: "Progresión del año", render: wYearProgress },
+  shoes: { title: "Zapatillas", render: wShoes },
 };
 
 route("home", async (view) => {
@@ -399,6 +401,7 @@ function wFitness(card, d) {
       <div class="kpi"><div class="v num">${snap.vo2max ? nf1.format(snap.vo2max) : "–"}</div><div class="l">VO2max</div></div>
     </div>
     <div class="chart" id="cFit" style="height:140px;margin-top:10px"></div>
+    ${(() => { const w = lastMono(d.monotony); return w ? `<div class="row" style="font-size:12px;margin-bottom:4px"><span class="muted">Monotonía ${w.monotony != null ? nf1.format(w.monotony) : "–"} · tensión ${int(w.strain)}</span>${monoTag(w)}</div>` : ""; })()}
     ${snap.acute_load ? `<div class="muted" style="font-size:12px">Garmin: carga aguda ${int(snap.acute_load)} · crónica ${int(snap.chronic_load)}${snap.acwr ? ` · ratio ${nf1.format(snap.acwr)}` : ""}</div>` : ""}
     <a class="more" href="#/forma">Ver evolución →</a>`;
   return () => fitnessChart($("#cFit", card), f, false);
@@ -491,6 +494,30 @@ function wPredictions(card, d) {
     : `<div class="muted">Garmin todavía no ha enviado predicciones.</div>`}`;
 }
 
+function wYearProgress(card, d) {
+  const P = d.progression || { years: [] };
+  card.innerHTML = `<h3>Progresión del año <span class="tag">km acumulados</span></h3><div class="muted" style="font-size:13px" id="ypInfo"></div><div class="chart" id="cYp" style="height:200px"></div>
+    <a class="more" href="#/stats">Comparar todos los años →</a>`;
+  if (!P.years.length) { $("#ypInfo", card).textContent = "Sin carreras todavía."; return; }
+  return () => {
+    const same = P.years.map((y) => ({ year: y.year, value: y.series[Math.min(P.today_doy, y.series.length) - 1] || 0 }));
+    progressionChart($("#cYp", card), { metric: "distance", years: P.years, same_date: same }, $("#ypInfo", card), true);
+  };
+}
+
+function wShoes(card, d) {
+  const S = d.shoes || [];
+  const colors = { ok: "var(--accent)", soon: "var(--warn)", replace: "var(--bad)" };
+  card.innerHTML = `<h3>Zapatillas ${S.some((x) => x.status === "replace") ? `<span class="tag bad">Toca cambiar</span>` : S.some((x) => x.status === "soon") ? `<span class="tag warn">Pronto</span>` : ""}</h3>
+    ${S.length ? `<div class="rec-list">${S.slice(0, 4).map((x) => `
+      <div style="padding:6px 0">
+        <div class="row" style="justify-content:space-between"><span><b>${esc(x.name)}</b> ${x.is_default ? `<span class="tag">Por defecto</span>` : ""}</span><span class="num">${nf0.format(x.km)} / ${nf0.format(x.limit_km)} km</span></div>
+        <div class="progress" style="margin:6px 0 0"><div style="width:${Math.min(100, x.pct || 0)}%;background:${colors[x.status] || "var(--accent)"}"></div></div>
+      </div>`).join("")}</div>`
+    : `<div class="muted">Añade tus zapatillas para llevar la cuenta de sus kilómetros y saber cuándo cambiarlas.</div>`}
+    <a class="more" href="#/zapatillas">${S.length ? "Gestionar →" : "Añadir zapatillas →"}</a>`;
+}
+
 function wWeeksChart(card, d) {
   card.innerHTML = `<h3>Kilómetros por semana <span class="tag">últimas 12</span></h3><div class="chart" id="cWeeks" style="height:200px"></div>`;
   return () => {
@@ -523,7 +550,7 @@ route("carreras", async (view) => {
       <input type="number" id="fmax" placeholder="km máx" min="0" step="1" value="${esc(listState.max_km)}">
     </div>
     <div class="table-wrap"><table>
-      <thead><tr>${th("date", "Carrera", "l")}<th class="l">Tipo</th>${th("distance", "Distancia")}${th("time", "Tiempo")}${th("pace", "Ritmo", "l")}${th("hr", "FC media")}${th("elev", "Desnivel")}${th("load", "Carga")}</tr></thead>
+      <thead><tr>${th("date", "Carrera", "l")}<th class="l">Tipo</th>${th("distance", "Distancia")}${th("time", "Tiempo")}${th("pace", "Ritmo", "l")}${th("gap", "GAP")}${th("hr", "FC media")}${th("elev", "Desnivel")}${th("load", "Carga")}</tr></thead>
       <tbody>${data.items.map((a) => `
         <tr class="link" data-id="${a.id}">
           <td><span class="name">${esc(a.name)}</span><span class="date">${fdate(a.date)} · ${(a.start_local || "").slice(11, 16)}</span></td>
@@ -531,10 +558,11 @@ route("carreras", async (view) => {
           <td class="num">${km(a.distance_m)} km</td>
           <td class="num">${dur(a.moving_s)}</td>
           <td class="l num">${pace(paceOf(a))} /km <span class="pace-bar" style="width:${Math.round((maxPace / (paceOf(a) || maxPace)) * 50 - 25)}px"></span></td>
+          <td class="num muted">${a.gap_pace ? pace(a.gap_pace) : "–"}</td>
           <td class="num">${int(a.avg_hr)}</td>
           <td class="num">${int(a.elev_gain)} m</td>
           <td class="num">${int(a.training_load)}</td>
-        </tr>`).join("") || `<tr><td colspan="8" class="empty">No hay carreras con estos filtros.</td></tr>`}</tbody>
+        </tr>`).join("") || `<tr><td colspan="9" class="empty">No hay carreras con estos filtros.</td></tr>`}</tbody>
     </table></div>
     <div class="pager"><button class="btn small" id="prev" ${listState.page <= 1 ? "disabled" : ""}>← Anterior</button>
       <span>Página ${listState.page} de ${pages}</span>
@@ -547,7 +575,7 @@ route("carreras", async (view) => {
   $$("th[data-sort]").forEach((th) => th.addEventListener("click", () => {
     const k = th.dataset.sort;
     if (listState.sort === k) listState.order = listState.order === "desc" ? "asc" : "desc";
-    else { listState.sort = k; listState.order = k === "pace" ? "asc" : "desc"; }
+    else { listState.sort = k; listState.order = k === "pace" || k === "gap" ? "asc" : "desc"; }
     reload();
   }));
   $("#prev").onclick = () => { listState.page--; reload(); };
@@ -570,12 +598,17 @@ route("carrera", async (view, id) => {
       <div class="kpi"><div class="v num">${km(a.distance_m)} km</div><div class="l">Distancia</div></div>
       <div class="kpi"><div class="v num">${dur(a.moving_s)}</div><div class="l">Tiempo en movimiento</div></div>
       <div class="kpi"><div class="v num">${pace(paceOf(a))}</div><div class="l">Ritmo medio /km</div></div>
+      <div class="kpi" title="Ritmo equivalente en llano: cuánto habrías ido en llano con el mismo esfuerzo"><div class="v num">${a.gap_pace ? pace(a.gap_pace) : "–"}</div><div class="l">Ritmo ajustado (GAP) /km</div></div>
       <div class="kpi"><div class="v num">${int(a.avg_hr)} <small class="muted">/ ${int(a.max_hr)}</small></div><div class="l">FC media / máx</div></div>
       <div class="kpi"><div class="v num">${int(a.elev_gain)} m</div><div class="l">Desnivel +</div></div>
       <div class="kpi"><div class="v num">${int(a.cadence)}</div><div class="l">Cadencia ppm</div></div>
       <div class="kpi"><div class="v num">${int(a.training_load)}</div><div class="l">Carga</div></div>
       <div class="kpi"><div class="v num">${a.aerobic_te ? nf1.format(a.aerobic_te) : "–"} / ${a.anaerobic_te ? nf1.format(a.anaerobic_te) : "–"}</div><div class="l">Efecto aeróbico / anaeróbico</div></div>
       <div class="kpi"><div class="v num">${int(a.calories)}</div><div class="l">Calorías</div></div>
+      <div class="kpi"><select id="shoeSel" style="width:100%;max-width:220px">
+          <option value="">Sin zapatilla</option>
+          ${d.shoes.filter((x) => !x.retired || x.id === a.shoe_id).map((x) => `<option value="${x.id}" ${x.id === a.shoe_id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
+        </select><div class="l">Zapatilla${d.shoes.length ? "" : ` · <a href="#/zapatillas" style="color:var(--accent)">añadir</a>`}</div></div>
     </div></div>
     ${s ? `
     <div class="two-col">
@@ -587,9 +620,13 @@ route("carrera", async (view, id) => {
     </div>
     <div class="card" style="margin-top:16px"><h3>Ritmo, frecuencia cardiaca y altitud</h3><div class="chart xl" id="cStreams"></div></div>
     <div class="card" style="margin-top:16px"><h3>Parciales por kilómetro</h3><div class="table-wrap" style="border:0"><table>
-      <thead><tr><th>Km</th><th class="l">Ritmo</th><th>Tiempo</th><th>FC</th><th>Cadencia</th><th>Desnivel</th></tr></thead>
+      <thead><tr><th>Km</th><th class="l">Ritmo</th><th title="Ritmo ajustado a la pendiente">GAP</th><th>Tiempo</th><th>FC</th><th>Cadencia</th><th>Desnivel</th></tr></thead>
       <tbody>${splitsRows(d.splits)}</tbody></table></div></div>`
     : `<div class="card empty" style="margin-top:16px">${a.fit_status === "pending" ? "El detalle (recorrido, gráficas y parciales) se descargará en la próxima sincronización." : "No hay detalle disponible para esta actividad. Puedes importar su archivo .FIT desde Ajustes."}</div>`}`;
+  $("#shoeSel").onchange = async (e) => {
+    try { await api(`/api/activities/${a.id}/shoe`, { method: "PUT", body: { shoe_id: e.target.value ? +e.target.value : null } }); toast("Zapatilla guardada"); }
+    catch (err) { toast(err.message, true); }
+  };
   if (!s) return;
   if (s.lat && s.lat.some(Boolean)) map($("#mDet"), s.lat.map((la, i) => [la, s.lon[i]]).filter((p) => p[0] && p[1]), { zoom: true });
   if (d.zones) renderZones($("#zones"), d.zones);
@@ -606,6 +643,7 @@ function splitsRows(splits) {
     const w = slow > fast ? 30 + 70 * (slow - x.pace) / (slow - fast) : 70;
     return `<tr><td>${x.dist < 990 ? nf1.format((x.n - 1) + x.dist / 1000) : x.n}</td>
       <td class="l num">${pace(x.pace)} <span class="pace-bar" style="width:${Math.max(6, w * 1.4)}px;${x.pace === fast ? "" : "opacity:.45"}"></span></td>
+      <td class="num muted">${x.gap ? pace(x.gap) : "–"}</td>
       <td class="num">${dur(x.time)}</td><td class="num">${int(x.hr)}</td><td class="num">${int(x.cad)}</td>
       <td class="num">${x.elev != null ? (Math.round(x.elev) > 0 ? "+" : "") + nf0.format(Math.round(x.elev) || 0) + " m" : "–"}</td></tr>`;
   }).join("");
@@ -628,6 +666,8 @@ function streamsChart(el, s) {
   const raw = s.spd.map((v) => (v && v > 0.5 ? 1000 / v : null));
   const W = 7;
   const pc = raw.map((_, i) => { const w = raw.slice(Math.max(0, i - W), i + W + 1).filter(Boolean); return w.length ? Math.round(w.reduce((a, b) => a + b, 0) / w.length) : null; });
+  const gapRaw = (s.gap_spd || []).map((v) => (v && v > 0.5 ? 1000 / v : null));
+  const gap = s.gap_spd ? gapRaw.map((_, i) => { const w = gapRaw.slice(Math.max(0, i - W), i + W + 1).filter(Boolean); return w.length ? Math.round(w.reduce((a, b) => a + b, 0) / w.length) : null; }) : null;
   const valid = pc.filter(Boolean).sort((a, b) => a - b);
   const pMin = valid[Math.floor(valid.length * 0.02)] || 180, pMax = valid[Math.floor(valid.length * 0.98)] || 480;
   const grids = [{ top: 10, height: "28%" }, { top: "38%", height: "28%" }, { top: "72%", height: "20%" }].map((g) => ({ left: 54, right: 14, ...g }));
@@ -635,7 +675,8 @@ function streamsChart(el, s) {
   chart(el, {
     grid: grids,
     axisPointer: { link: [{ xAxisIndex: "all" }] },
-    tooltip: { formatter: (ps) => `${nf1.format(ps[0].axisValue)} km<br>` + ps.map((p) => `${p.marker}${p.seriesName}: <b>${p.seriesIndex === 0 ? pace(p.value) + " /km" : p.seriesIndex === 1 ? p.value + " ppm" : nf0.format(p.value) + " m"}</b>`).join("<br>") },
+    legend: gap ? { top: 0, right: 14, data: ["Ritmo", "GAP"], textStyle: { color: t.text, fontSize: 11 } } : undefined,
+    tooltip: { formatter: (ps) => `${nf1.format(ps[0].axisValue)} km<br>` + ps.map((p) => `${p.marker}${p.seriesName}: <b>${p.seriesName === "FC" ? p.value + " ppm" : p.seriesName === "Altitud" ? nf0.format(p.value) + " m" : pace(p.value) + " /km"}</b>`).join("<br>") },
     xAxis: [xa(0, false), xa(1, false), xa(2, true)],
     yAxis: [
       { type: "value", gridIndex: 0, inverse: true, min: Math.floor(pMin / 15) * 15, max: Math.ceil(pMax / 15) * 15, axisLabel: { formatter: (v) => pace(v) } },
@@ -645,6 +686,7 @@ function streamsChart(el, s) {
     dataZoom: [{ type: "inside", xAxisIndex: [0, 1, 2] }],
     series: [
       { name: "Ritmo", type: "line", data: pc, xAxisIndex: 0, yAxisIndex: 0, symbol: "none", lineStyle: { color: t.accent, width: 1.6 }, itemStyle: { color: t.accent } },
+      ...(gap ? [{ name: "GAP", type: "line", data: gap, xAxisIndex: 0, yAxisIndex: 0, symbol: "none", lineStyle: { color: t.blue, width: 1.2, type: "dashed" }, itemStyle: { color: t.blue } }] : []),
       { name: "FC", type: "line", data: smooth(s.hr, 3), xAxisIndex: 1, yAxisIndex: 1, symbol: "none", lineStyle: { color: t.bad, width: 1.4 }, itemStyle: { color: t.bad } },
       { name: "Altitud", type: "line", data: s.alt, xAxisIndex: 2, yAxisIndex: 2, symbol: "none", lineStyle: { color: t.faint, width: 1 }, itemStyle: { color: t.faint }, areaStyle: { color: t.faint + "44" } },
     ],
@@ -730,11 +772,17 @@ route("forma", async (view) => {
       <div class="card"><h3>Garmin ${st ? `<span class="tag ${st[1]}">${esc(st[0])}</span>` : ""}</h3><div class="big num">${snap.vo2max ? nf1.format(snap.vo2max) : "–"}<small>VO2max</small></div>
         <div class="muted">${snap.acute_load ? `Carga aguda ${int(snap.acute_load)} · crónica ${int(snap.chronic_load)}` : "Estado de entrenamiento según tu reloj"}</div></div>
       <div class="card wide" style="grid-column:1/-1"><h3>Evolución</h3><div class="chart xl" id="fChart"></div></div>
+      <div class="card wide" style="grid-column:1/-1"><h3>Monotonía y tensión semanal ${monoTag(lastMono(f.monotony))}</h3>
+        <div class="row" style="gap:28px;margin-bottom:6px">${monoSummary(lastMono(f.monotony))}</div>
+        <div class="chart tall" id="mChart"></div>
+        <p class="faint" style="font-size:12px;margin:8px 0 0">Monotonía = carga media diaria ÷ su desviación típica en la semana: por encima de 2 indica días demasiado parecidos entre sí, sin contraste entre duros y suaves.
+        Tensión = carga semanal × monotonía; se marca alta cuando supera tu propia media de las 12 semanas anteriores más 1,5 desviaciones. Mucha carga con poca variedad es cuando más riesgo hay de sobrecarga o enfermedad (Foster).</p></div>
       <div class="card wide" style="grid-column:1/-1"><h3>VO2max</h3><div class="chart" id="vChart" style="height:220px"></div></div>
     </div>
     <p class="faint" style="font-size:12px">La carga de cada actividad es la que calcula Garmin (EPOC). Si una actividad no la tiene, se estima con el TRIMP de Banister a partir de la FC media, la FC máxima y la de reposo. Se incluyen todos los deportes, no sólo la carrera, porque todos generan fatiga.</p>`;
   $$("#range button").forEach((b) => (b.onclick = () => { fitDays = +b.dataset.n; rerender(); }));
   fitnessChart($("#fChart"), f.series, true);
+  monotonyChart($("#mChart"), f.monotony.weeks);
   const t = theme();
   chart($("#vChart"), {
     xAxis: { type: "category", data: f.vo2.map((x) => x.date), axisLabel: { formatter: (v) => fdateShort(v) + " " + v.slice(2, 4) } },
@@ -743,11 +791,48 @@ route("forma", async (view) => {
   });
 });
 
+function lastMono(m) {
+  // la semana en curso puede no tener carga aún: usar la última con entrenamientos
+  const ws = (m && m.weeks) || [];
+  for (let i = ws.length - 1; i >= 0; i--) if (ws[i].load > 0) return ws[i];
+  return null;
+}
+function monoTag(w) {
+  if (!w) return "";
+  if (w.flags.includes("strain")) return `<span class="tag bad">Tensión alta</span>`;
+  if (w.flags.includes("monotony")) return `<span class="tag warn">Entrenamiento monótono</span>`;
+  return `<span class="tag good">Equilibrado</span>`;
+}
+function monoSummary(w) {
+  if (!w) return `<span class="muted">Sin carga registrada todavía.</span>`;
+  return `<div class="kpi"><div class="v num">${w.monotony != null ? nf1.format(w.monotony) : "–"}</div><div class="l">Monotonía (semana del ${fdateShort(w.week)})</div></div>
+    <div class="kpi"><div class="v num">${int(w.strain)}</div><div class="l">Tensión${w.strain_limit ? ` · tu límite ${int(w.strain_limit)}` : ""}</div></div>
+    <div class="kpi"><div class="v num">${int(w.load)}</div><div class="l">Carga · ${w.days} días con entreno</div></div>`;
+}
+function monotonyChart(el, weeks) {
+  const t = theme();
+  return chart(el, {
+    legend: { top: 0, textStyle: { color: t.text }, icon: "roundRect" }, grid: { top: 34 },
+    xAxis: { type: "category", data: weeks.map((w) => fdateShort(w.week)) },
+    yAxis: [{ type: "value" }, { type: "value", min: 0, max: (v) => Math.max(3, Math.ceil(v.max)), splitLine: { show: false } }],
+    tooltip: { formatter: (ps) => `Semana del ${ps[0].axisValue}<br>` + ps.map((p) => `${p.marker}${p.seriesName}: <b>${p.value == null ? "–" : p.seriesName === "Monotonía" ? nf1.format(p.value) : nf0.format(p.value)}</b>`).join("<br>") },
+    series: [
+      { name: "Tensión", type: "bar", data: weeks.map((w) => ({ value: w.strain, itemStyle: { color: w.flags.includes("strain") ? t.bad : t.accent + "aa", borderRadius: [4, 4, 0, 0] } })), itemStyle: { color: t.accent } },
+      { name: "Tu límite de tensión", type: "line", data: weeks.map((w) => w.strain_limit), symbol: "none", step: "middle", lineStyle: { color: t.bad, type: "dashed", width: 1.2 }, itemStyle: { color: t.bad } },
+      { name: "Monotonía", type: "line", yAxisIndex: 1, data: weeks.map((w) => w.monotony), symbol: "circle", symbolSize: 5, lineStyle: { color: t.violet, width: 2 }, itemStyle: { color: t.violet },
+        markLine: { symbol: "none", silent: true, lineStyle: { color: t.warn, type: "dotted" }, label: { color: t.text, formatter: "monotonía 2", position: "insideEndTop" }, data: [{ yAxis: 2 }] } },
+    ],
+  });
+}
+
 // ================================================================ RÉCORDS
 route("records", async (view) => {
-  const R = await api("/api/records");
+  const [R, PC] = await Promise.all([api("/api/records"), api("/api/pace-curve?days=90")]);
   view.innerHTML = `
     <div class="page-head"><div><h1>Récords personales</h1><div class="sub">Mejores tiempos dentro de cualquier carrera, calculados con el detalle segundo a segundo</div></div></div>
+    ${PC.all.length ? `<div class="card" style="margin-bottom:16px"><h3>Curva de ritmo</h3>
+      <div class="muted" style="font-size:13px;margin-top:-6px">Tu mejor ritmo sostenido para cada duración. Si la línea de los últimos ${PC.recent_days} días se acerca a la histórica, estás cerca de tu mejor forma en ese rango.</div>
+      <div class="chart tall" id="pcChart"></div></div>` : ""}
     <div class="grid">${R.map((r, i) => `
       <div class="card"><h3>${r.label} ${r.best_year ? `<span class="tag">${new Date().getFullYear()}: ${dur(r.best_year.time_s)}</span>` : ""}</h3>
         ${r.top.length ? `
@@ -758,6 +843,7 @@ route("records", async (view) => {
         : `<div class="muted">Aún no has corrido esta distancia.</div>`}
       </div>`).join("")}</div>`;
   const t = theme();
+  if (PC.all.length) paceCurveChart($("#pcChart"), PC);
   R.forEach((r, i) => {
     if (r.progression.length < 1) return;
     chart($(`#rp${i}`), {
@@ -770,8 +856,63 @@ route("records", async (view) => {
   });
 });
 
+function durLabel(sec) {
+  return sec < 60 ? `${sec} s` : sec < 3600 ? `${sec / 60} min` : `${nf1.format(sec / 3600).replace(",0", "")} h`;
+}
+function paceCurveChart(el, PC) {
+  const t = theme();
+  const durs = PC.all.map((x) => x.duration);
+  const byDur = (arr) => { const m = Object.fromEntries(arr.map((x) => [x.duration, x])); return durs.map((d) => m[d] || null); };
+  const all = byDur(PC.all), year = byDur(PC.year), recent = byDur(PC.recent);
+  const vals = PC.all.map((x) => x.pace).concat(PC.recent.map((x) => x.pace));
+  return chart(el, {
+    legend: { top: 0, textStyle: { color: t.text }, icon: "roundRect" }, grid: { top: 34 },
+    xAxis: { type: "category", data: durs.map(durLabel), boundaryGap: false },
+    yAxis: { type: "value", inverse: true, min: Math.floor(Math.min(...vals) / 15) * 15, max: Math.ceil(Math.max(...vals) / 15) * 15, axisLabel: { formatter: (v) => pace(v) } },
+    tooltip: { formatter: (ps) => `${ps[0].axisValue}<br>` + ps.map((p) => {
+      const src = [all, year, recent][p.seriesIndex][p.dataIndex];
+      return `${p.marker}${p.seriesName}: <b>${pace(p.value)} /km</b>${src ? ` <span style="opacity:.7">· ${fdateShort(src.date)} ${src.date.slice(0, 4)}</span>` : ""}`;
+    }).join("<br>") },
+    series: [
+      { name: "Histórico", type: "line", data: all.map((x) => x && x.pace), smooth: true, symbolSize: 6, lineStyle: { color: t.accent, width: 2.5 }, itemStyle: { color: t.accent }, areaStyle: { color: t.accent + "14" } },
+      { name: String(new Date().getFullYear()), type: "line", data: year.map((x) => x && x.pace), smooth: true, symbolSize: 5, lineStyle: { color: t.blue, width: 1.8 }, itemStyle: { color: t.blue } },
+      { name: `Últimos ${PC.recent_days} días`, type: "line", data: recent.map((x) => x && x.pace), smooth: true, symbolSize: 5, lineStyle: { color: t.good, width: 1.8, type: "dashed" }, itemStyle: { color: t.good } },
+    ],
+  });
+}
+
 // ================================================================ ESTADÍSTICAS
 let statsGroup = "month";
+let progMetric = "distance";
+const PROG_UNITS = { distance: ["km", 1], time: ["h", 1], elev: ["m", 0] };
+function doyLabel(doy) { const d = new Date(2025, 0, doy); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; }
+function fmtMetric(v, metric) {
+  if (v == null) return "–";
+  return metric === "time" ? hours(v * 3600) : metric === "elev" ? `${nf0.format(v)} m` : `${nf1.format(v)} km`;
+}
+function progressionChart(el, P, infoEl, compact = false) {
+  const t = theme();
+  const thisYear = new Date().getFullYear();
+  const palette = [t.faint, t.violet, t.blue, t.good, t.warn];
+  const others = P.years.filter((y) => y.year !== thisYear);
+  const days = Array.from({ length: 366 }, (_, i) => i + 1);
+  if (infoEl) {
+    const cur = P.same_date.find((x) => x.year === thisYear), prev = P.same_date.find((x) => x.year === thisYear - 1);
+    const best = [...P.same_date].sort((a, b) => b.value - a.value)[0];
+    infoEl.innerHTML = cur ? `A día de hoy: <b>${fmtMetric(cur.value, P.metric)}</b>${prev ? ` · ${cur.value >= prev.value ? "por delante" : "por detrás"} de ${thisYear - 1} en <b>${fmtMetric(Math.abs(cur.value - prev.value), P.metric)}</b>` : ""}${best && best.year !== thisYear ? ` · tu mejor año a estas alturas fue ${best.year} (${fmtMetric(best.value, P.metric)})` : ""}` : "";
+  }
+  return chart(el, {
+    legend: compact ? undefined : { top: 0, textStyle: { color: t.text }, icon: "roundRect" },
+    grid: { top: compact ? 8 : 34, left: 8, right: 14, bottom: 4, containLabel: true },
+    xAxis: { type: "category", data: days, boundaryGap: false, axisLabel: { interval: (i) => [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334].includes(i), formatter: (v) => MONTHS[new Date(2025, 0, v).getMonth()] } },
+    yAxis: { type: "value", axisLabel: { formatter: (v) => P.metric === "time" ? `${v} h` : nf0.format(v) } },
+    tooltip: { formatter: (ps) => `${doyLabel(+ps[0].axisValue)}<br>` + ps.filter((p) => p.value != null).map((p) => `${p.marker}${p.seriesName}: <b>${fmtMetric(p.value, P.metric)}</b>`).join("<br>") },
+    series: [
+      ...others.map((y, i) => ({ name: String(y.year), type: "line", data: y.series, symbol: "none", lineStyle: { width: 1.4, color: palette[(others.length - 1 - i) % palette.length] }, itemStyle: { color: palette[(others.length - 1 - i) % palette.length] } })),
+      ...P.years.filter((y) => y.year === thisYear).map((y) => ({ name: String(y.year), type: "line", data: y.series, symbol: "none", lineStyle: { width: 3, color: t.accent }, itemStyle: { color: t.accent }, areaStyle: { color: t.accent + "14" } })),
+    ],
+  });
+}
 route("stats", async (view) => {
   const S = await api(`/api/stats?group=${statsGroup}`);
   const T = S.totals || {};
@@ -783,6 +924,10 @@ route("stats", async (view) => {
     <div class="grid">
       <div class="card"><h3>Total</h3><div class="big num">${km(T.dist)}<small>km</small></div><div class="muted">${int(T.n)} carreras · ${hours(T.secs)} · ${int(T.elev)} m+</div></div>
       <div class="card"><h3>Ritmo medio histórico</h3><div class="big num">${pace(T.dist ? T.secs / (T.dist / 1000) : null)}<small>/km</small></div><div class="muted">Distancia media ${T.n ? km(T.dist / T.n) : "–"} km por carrera</div></div>
+      <div class="card wide" style="grid-column:1/-1"><h3>Progresión anual</h3>
+        <div class="row" style="justify-content:space-between;margin-top:-4px"><div class="muted" style="font-size:13px" id="progInfo"></div>
+          <div class="seg" id="progSeg">${[["distance", "Distancia"], ["time", "Tiempo"], ["elev", "Desnivel"]].map(([k, l]) => `<button data-m="${k}" class="${k === progMetric ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        <div class="chart xl" id="sProg"></div></div>
       <div class="card wide" style="grid-column:1/-1"><h3>Volumen y ritmo</h3><div class="chart xl" id="sVol"></div></div>
       <div class="card"><h3>¿Qué días corres?</h3><div class="chart" id="sWd" style="height:220px"></div></div>
       <div class="card"><h3>Distancias</h3><div class="chart" id="sHist" style="height:220px"></div></div>
@@ -791,6 +936,16 @@ route("stats", async (view) => {
     <div class="table-wrap"><table><thead><tr><th>Periodo</th><th>Carreras</th><th>Distancia</th><th>Tiempo</th><th>Ritmo</th><th>Desnivel</th><th>Más larga</th></tr></thead>
       <tbody>${[...S.periods].reverse().map((p) => `<tr><td>${label(p.period)}</td><td class="num">${p.n}</td><td class="num">${km(p.dist)} km</td><td class="num">${hours(p.secs)}</td><td class="num">${pace(p.pace)}</td><td class="num">${int(p.elev)} m</td><td class="num">${km(p.longest)} km</td></tr>`).join("")}</tbody></table></div>`;
   $$("#grp button").forEach((b) => (b.onclick = () => { statsGroup = b.dataset.g; rerender(); }));
+  const drawProg = async () => {
+    const P = await api(`/api/progression?metric=${progMetric}`);
+    progressionChart($("#sProg"), P, $("#progInfo"));
+  };
+  $$("#progSeg button").forEach((b) => (b.onclick = () => {
+    progMetric = b.dataset.m; $$("#progSeg button").forEach((x) => x.classList.toggle("on", x === b));
+    const c = echarts.getInstanceByDom($("#sProg")); if (c) { charts = charts.filter((x) => x !== c); c.dispose(); }
+    drawProg();
+  }));
+  drawProg();
   const t = theme();
   chart($("#sVol"), {
     legend: { top: 0, textStyle: { color: t.text } }, grid: { top: 34 },
@@ -816,6 +971,83 @@ route("stats", async (view) => {
     tooltip: { formatter: (ps) => `${ps[0].axisValue}: <b>${ps[0].value}</b> carreras` },
     series: [{ type: "bar", data: order.map((k) => hist[k] || 0), itemStyle: { color: t.violet + "cc", borderRadius: [4, 4, 0, 0] } }],
   });
+});
+
+// ================================================================ ZAPATILLAS
+route("zapatillas", async (view) => {
+  const S = await api("/api/shoes");
+  const active = S.filter((x) => !x.retired), retired = S.filter((x) => x.retired);
+  const colors = { ok: "var(--accent)", soon: "var(--warn)", replace: "var(--bad)", retired: "var(--faint)" };
+  const label = { ok: "", soon: `<span class="tag warn">Cerca del límite</span>`, replace: `<span class="tag bad">Toca cambiarlas</span>`, retired: `<span class="tag">Retiradas</span>` };
+  const shoeCard = (x) => `
+    <div class="card">
+      <h3>${esc(x.brand || "Zapatilla")} ${x.is_default ? `<span class="tag accent">Por defecto</span>` : ""} ${label[x.status]}</h3>
+      <div class="mid">${esc(x.name)}</div>
+      <div class="row" style="justify-content:space-between;margin-top:8px"><span class="big num" style="font-size:30px">${nf0.format(x.km)}<small>km</small></span><span class="muted num">de ${nf0.format(x.limit_km)} km</span></div>
+      <div class="progress"><div style="width:${Math.min(100, x.pct || 0)}%;background:${colors[x.status]}"></div></div>
+      <div class="muted" style="font-size:12px">${x.runs} carreras${x.initial_km ? ` · ${nf0.format(x.initial_km)} km previos` : ""}${x.first_used ? ` · desde ${fdateShort(x.first_used)} ${x.first_used.slice(0, 4)}` : ""}${x.last_used ? ` · última ${fdateShort(x.last_used)}` : ""}</div>
+      ${x.notes ? `<div class="faint" style="font-size:12px;margin-top:6px">${esc(x.notes)}</div>` : ""}
+      <div class="row" style="margin-top:12px">
+        ${x.retired ? `<button class="btn small" data-unretire="${x.id}">Volver a usar</button>`
+          : `${x.is_default ? "" : `<button class="btn small" data-default="${x.id}">Por defecto</button>`}<button class="btn small ghost" data-retire="${x.id}">Retirar</button>`}
+        <button class="btn small ghost" data-edit="${x.id}">Editar</button>
+        <button class="btn small ghost" data-delshoe="${x.id}" style="color:var(--bad)">Eliminar</button>
+      </div>
+    </div>`;
+  view.innerHTML = `
+    <div class="page-head"><div><h1>Zapatillas</h1><div class="sub">Kilómetros de cada par y aviso cuando se acercan al límite</div></div>
+      <button class="btn primary" id="addShoe">Añadir zapatillas</button></div>
+    <div class="card" id="shoeFormCard" hidden style="margin-bottom:16px"><h3 id="shoeFormTitle">Nuevas zapatillas</h3>
+      <form id="shoeForm" class="form-grid">
+        <label class="field">Modelo<input type="text" id="sfName" required maxlength="60" placeholder="Pegasus 41"></label>
+        <label class="field">Marca<input type="text" id="sfBrand" maxlength="60" placeholder="Nike"></label>
+        <label class="field">En uso desde<input type="date" id="sfStart"></label>
+        <label class="field">Km previos<input type="number" id="sfInit" min="0" step="1" value="0"></label>
+        <label class="field">Límite (km)<input type="number" id="sfLimit" min="50" max="5000" step="10" value="700"></label>
+        <label class="field" style="grid-column:1/-1">Notas<input type="text" id="sfNotes" maxlength="300" placeholder="Talla, para qué las usas…"></label>
+        <label class="check"><input type="checkbox" id="sfDefault" checked> Usar por defecto en las carreras nuevas</label>
+        <label class="check" id="sfAssignWrap"><input type="checkbox" id="sfAssign" checked> Asignarlas a las carreras sin zapatilla desde esa fecha</label>
+        <div class="row"><button class="btn primary">Guardar</button><button type="button" class="btn ghost" id="sfCancel">Cancelar</button></div>
+      </form><div id="sfMsg"></div>
+      <div class="faint" style="font-size:12px;margin-top:8px">Como referencia, unas zapatillas de entrenamiento suelen durar entre 600 y 900 km; las de competición, bastante menos.</div></div>
+    ${S.length ? `<div class="grid">${active.map(shoeCard).join("")}</div>
+      ${retired.length ? `<div class="section-title">Retiradas</div><div class="grid">${retired.map(shoeCard).join("")}</div>` : ""}`
+    : `<div class="card empty"><h2>Aún no has añadido zapatillas</h2><p>Añade las que usas, márcalas por defecto y cada carrera nueva sumará sus kilómetros automáticamente. Puedes cambiar la zapatilla de cualquier carrera desde su detalle.</p></div>`}`;
+  let editing = null;
+  const form = $("#shoeFormCard");
+  const open = (x) => {
+    editing = x || null;
+    form.hidden = false;
+    $("#shoeFormTitle").textContent = x ? "Editar zapatillas" : "Nuevas zapatillas";
+    $("#sfName").value = x ? x.name : ""; $("#sfBrand").value = x ? x.brand || "" : "";
+    $("#sfStart").value = x ? x.start_date || "" : new Date().toISOString().slice(0, 10);
+    $("#sfInit").value = x ? x.initial_km : 0; $("#sfLimit").value = x ? x.limit_km : 700; $("#sfNotes").value = x ? x.notes || "" : "";
+    $("#sfDefault").checked = x ? !!x.is_default : true;
+    $("#sfAssignWrap").hidden = !!x;
+    $("#sfName").focus();
+  };
+  $("#addShoe").onclick = () => open(null);
+  $("#sfCancel").onclick = () => { form.hidden = true; };
+  $("#shoeForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { name: $("#sfName").value, brand: $("#sfBrand").value, start_date: $("#sfStart").value || null,
+      initial_km: +$("#sfInit").value || 0, limit_km: +$("#sfLimit").value || 700, notes: $("#sfNotes").value, is_default: $("#sfDefault").checked };
+    try {
+      if (editing) await api(`/api/shoes/${editing.id}`, { method: "PUT", body });
+      else await api("/api/shoes", { method: "POST", body: { ...body, assign_existing: $("#sfAssign").checked } });
+      toast("Guardado"); rerender();
+    } catch (err) { $("#sfMsg").innerHTML = `<p class="tag bad" style="white-space:normal">${esc(err.message)}</p>`; }
+  };
+  const byId = Object.fromEntries(S.map((x) => [x.id, x]));
+  const put = async (x, extra) => { await api(`/api/shoes/${x.id}`, { method: "PUT", body: { ...x, ...extra } }); rerender(); };
+  $$("[data-edit]").forEach((b) => (b.onclick = () => open(byId[b.dataset.edit])));
+  $$("[data-default]").forEach((b) => (b.onclick = () => put(byId[b.dataset.default], { is_default: true })));
+  $$("[data-retire]").forEach((b) => (b.onclick = () => put(byId[b.dataset.retire], { retired: true })));
+  $$("[data-unretire]").forEach((b) => (b.onclick = () => put(byId[b.dataset.unretire], { retired: false })));
+  $$("[data-delshoe]").forEach((b) => (b.onclick = async () => {
+    if (!confirm(`¿Eliminar «${byId[b.dataset.delshoe].name}»? Las carreras se conservan, sólo dejan de estar asignadas. Si ya no las usas, mejor «Retirar».`)) return;
+    await api(`/api/shoes/${b.dataset.delshoe}`, { method: "DELETE" }); rerender();
+  }));
 });
 
 // ================================================================ AJUSTES

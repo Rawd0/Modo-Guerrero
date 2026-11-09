@@ -84,7 +84,7 @@ def main():
                 "vo2max": round(48 + 6 * fitness), "start_lat": stream["lat"][0], "start_lon": stream["lon"][0],
                 "source": "garmin", "fit_status": "ok", "raw": None}, "id")
             db.save_stream(aid, stream)
-            metrics.store_best_efforts(aid, stream)
+            metrics.store_derived(aid, stream)
         if (today - day).days < 180:
             sleep = random.gauss(7.2, 0.7) * 3600
             hrv = random.gauss(58 + 6 * fitness, 6)

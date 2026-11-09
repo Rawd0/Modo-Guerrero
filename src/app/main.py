@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, db, garmin_auth, metrics, stats, sync
+from . import auth, db, garmin_auth, metrics, shoes, stats, sync
 from .config import APP_NAME, DEFAULT_SETTINGS, VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -296,7 +296,7 @@ def activities(request: Request, q: str = "", year: str = "", sport: str = "", m
         where.append("distance_m<=?")
         params.append(max_km * 1000)
     cols = {"date": "start_local", "distance": "distance_m", "time": "moving_s", "pace": "moving_s/distance_m",
-            "hr": "avg_hr", "elev": "elev_gain", "load": "training_load"}
+            "hr": "avg_hr", "elev": "elev_gain", "load": "training_load", "gap": "gap_pace"}
     sort_col = cols.get(sort, "start_local")
     order = "ASC" if order.lower() == "asc" else "DESC"
     w = " AND ".join(where)
@@ -322,6 +322,11 @@ def activity(request: Request, aid: int):
     for e in efforts:
         e["is_pr"] = stats.is_personal_record(uid, e["distance_m"], e["time_s"])
     hr_rest, hr_max = metrics.hr_bounds(uid)
+    if st:
+        # serie de ritmo ajustado a la pendiente para la gráfica (velocidad equivalente en llano)
+        factors = metrics.grade_factors(st)
+        if factors:
+            st["gap_spd"] = [round(v * f, 3) if v else None for v, f in zip(st.get("spd") or [], factors)]
     zones = None
     if st and any(st.get("hr") or []):
         # tiempo en 5 zonas por % de FC máxima
@@ -338,6 +343,7 @@ def activity(request: Request, aid: int):
                  "limits": [round(b * hr_max) for b in bounds]}
     return {
         "activity": a,
+        "shoes": [{"id": x["id"], "name": x["name"], "retired": x["retired"]} for x in shoes.list_shoes(uid)],
         "stream": metrics.downsample(st) if st else None,
         "splits": metrics.km_splits(st) if st else [],
         "efforts": efforts,
@@ -369,7 +375,62 @@ def get_fitness(request: Request, days: int = 180):
     vo2 = db.rows("SELECT date, MAX(vo2max) vo2max FROM activities WHERE user_id=? AND vo2max IS NOT NULL "
                   "GROUP BY date ORDER BY date", (uid,))
     return {"series": metrics.fitness_series(uid, min(max(days, 14), 3650)), "vo2": vo2 or snaps,
-            "snapshot": stats.latest_snapshot(uid)}
+            "snapshot": stats.latest_snapshot(uid),
+            "monotony": metrics.monotony_strain(uid, weeks=max(8, min(days // 7, 104)))}
+
+
+@app.get("/api/progression")
+def get_progression(request: Request, metric: str = "distance"):
+    if metric not in ("distance", "time", "elev"):
+        metric = "distance"
+    return stats.progression(_uid(request), metric)
+
+
+@app.get("/api/pace-curve")
+def get_pace_curve(request: Request, days: int = 90):
+    return stats.pace_curve(_uid(request), min(max(days, 7), 3650))
+
+
+# ---------- zapatillas ----------
+def _shoe_call(fn, *a):
+    try:
+        return fn(*a)
+    except shoes.ShoeError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/shoes")
+def list_shoes(request: Request):
+    return shoes.list_shoes(_uid(request))
+
+
+@app.post("/api/shoes")
+def create_shoe(request: Request, payload: dict = Body(...)):
+    return {"ok": True, "id": _shoe_call(shoes.create, _uid(request), payload)}
+
+
+@app.put("/api/shoes/{shoe_id}")
+def update_shoe(request: Request, shoe_id: int, payload: dict = Body(...)):
+    _shoe_call(shoes.update, _uid(request), shoe_id, payload)
+    return {"ok": True}
+
+
+@app.post("/api/shoes/{shoe_id}/assign")
+def assign_shoe(request: Request, shoe_id: int, payload: dict = Body(...)):
+    n = _shoe_call(shoes.assign_since, _uid(request), shoe_id, payload.get("since") or "0000-00-00")
+    return {"ok": True, "assigned": n}
+
+
+@app.delete("/api/shoes/{shoe_id}")
+def delete_shoe(request: Request, shoe_id: int):
+    _shoe_call(shoes.delete, _uid(request), shoe_id)
+    return {"ok": True}
+
+
+@app.put("/api/activities/{aid}/shoe")
+def set_activity_shoe(request: Request, aid: int, payload: dict = Body(...)):
+    _shoe_call(shoes.assign_activity, _uid(request), aid, payload.get("shoe_id"))
+    return {"ok": True}
 
 
 @app.post("/api/upload")

@@ -15,7 +15,7 @@ from .config import DB_PATH, DEFAULT_SETTINGS
 
 log = logging.getLogger("guerrero.db")
 _lock = threading.RLock()
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS activities (
     start_lon REAL,
     source TEXT DEFAULT 'garmin',
     fit_status TEXT DEFAULT 'pending',
+    gap_pace REAL,
+    derived_v INTEGER DEFAULT 0,
+    shoe_id INTEGER,
     raw TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_act_date ON activities(date);
@@ -70,6 +73,27 @@ CREATE TABLE IF NOT EXISTS best_efforts (
     time_s REAL,
     PRIMARY KEY (activity_id, distance_m)
 );
+CREATE TABLE IF NOT EXISTS best_durations (
+    activity_id INTEGER,
+    duration_s INTEGER,
+    dist_m REAL,
+    PRIMARY KEY (activity_id, duration_s)
+);
+CREATE INDEX IF NOT EXISTS ix_bd_dur ON best_durations(duration_s);
+CREATE TABLE IF NOT EXISTS shoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    brand TEXT,
+    start_date TEXT,
+    initial_km REAL DEFAULT 0,
+    limit_km REAL DEFAULT 700,
+    retired INTEGER DEFAULT 0,
+    is_default INTEGER DEFAULT 0,
+    notes TEXT,
+    created TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_shoes_user ON shoes(user_id);
 CREATE TABLE IF NOT EXISTS daily_health (
     user_id INTEGER NOT NULL DEFAULT 0,
     date TEXT NOT NULL,
@@ -118,7 +142,7 @@ CREATE INDEX IF NOT EXISTS ix_sync_user ON sync_log(user_id, id);
 """
 
 # tablas con datos de cada usuario (best_efforts y streams cuelgan de activities)
-USER_TABLES = ("activities", "daily_health", "snapshots", "sync_log", "user_settings")
+USER_TABLES = ("activities", "daily_health", "snapshots", "sync_log", "user_settings", "shoes")
 
 
 def connect():
@@ -173,6 +197,12 @@ def _migrate(con):
             if _exists(con, table) and "user_id" not in _cols(con, table):
                 block = SCHEMA.split(f"CREATE TABLE IF NOT EXISTS {table} (")[1].split(");")[0]
                 _rebuild_with_user(con, table, f"CREATE TABLE {table} ({block})")
+    # v3: GAP, versión de cálculos derivados y zapatilla de cada carrera
+    if _exists(con, "activities"):
+        have = _cols(con, "activities")
+        for col, typ in (("gap_pace", "REAL"), ("derived_v", "INTEGER DEFAULT 0"), ("shoe_id", "INTEGER")):
+            if col not in have:
+                con.execute(f"ALTER TABLE activities ADD COLUMN {col} {typ}")
     if _exists(con, "sync_log") and "user_id" not in _cols(con, "sync_log"):
         con.execute("ALTER TABLE sync_log ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")
     if _exists(con, "users") and "must_change" not in _cols(con, "users"):
@@ -202,7 +232,7 @@ def claim_unassigned(user_id: int):
             + con.execute("SELECT COUNT(*) FROM user_settings WHERE user_id=0").fetchone()[0]
         if not n:
             return
-        for t in ("activities", "daily_health", "snapshots", "sync_log"):
+        for t in ("activities", "daily_health", "snapshots", "sync_log", "shoes"):
             con.execute(f"UPDATE OR IGNORE {t} SET user_id=? WHERE user_id=0", (user_id,))
         con.execute("INSERT OR IGNORE INTO user_settings (user_id, key, value) "
                     "SELECT ?, key, value FROM user_settings WHERE user_id=0", (user_id,))
@@ -216,6 +246,7 @@ def delete_user_data(user_id: int):
         ids = "SELECT id FROM activities WHERE user_id=?"
         con.execute(f"DELETE FROM streams WHERE activity_id IN ({ids})", (user_id,))
         con.execute(f"DELETE FROM best_efforts WHERE activity_id IN ({ids})", (user_id,))
+        con.execute(f"DELETE FROM best_durations WHERE activity_id IN ({ids})", (user_id,))
         for t in USER_TABLES:
             con.execute(f"DELETE FROM {t} WHERE user_id=?", (user_id,))
 
@@ -271,11 +302,11 @@ def all_settings(user_id: int):
     for r in rows("SELECT key, value FROM user_settings WHERE user_id=?", (user_id,)):
         if r["key"] in DEFAULT_SETTINGS:
             out[r["key"]] = json.loads(r["value"])
-    # widgets: añadir los nuevos que no estén en la configuración guardada
+    # widgets: añadir al final los que hayan aparecido en versiones nuevas
     known = {w["id"] for w in out["widgets"]}
     for w in DEFAULT_SETTINGS["widgets"]:
         if w["id"] not in known:
-            out["widgets"].append(dict(w, visible=False))
+            out["widgets"].append(dict(w))
     return out
 
 

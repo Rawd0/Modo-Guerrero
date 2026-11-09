@@ -8,25 +8,14 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
 - **0.3.0** Tema (automático, claro, oscuro, negro) y color principal personalizables.
 - **0.4.0** Varios usuarios en la misma instalación: panel de administración, datos, cuenta de
   Garmin y ajustes separados por usuario, sincronización por turnos.
-
-## Próximo paquete: análisis de carrera
-
-Inspirado en Elevate, Runalyze e intervals.icu.
-
-- **Progresión anual acumulada** (Elevate): kilómetros acumulados de cada año superpuestos día a
-  día, para ver si vas por delante o por detrás de otros años. También para tiempo y desnivel.
-- **Ritmo ajustado a la pendiente (GAP)** (Elevate): ritmo equivalente en llano para cada carrera,
-  gráfica y parcial, de modo que una tirada con cuestas se pueda comparar con una llana.
-- **Kilometraje de zapatillas** (Runalyze, intervals.icu): dar de alta cada par, asignarlo a las
-  carreras (con un par por defecto) y avisar cuando se acerca al límite de km.
-- **Curva de ritmo** (intervals.icu): tu mejor ritmo sostenido para cada duración (1 min a 3 h),
-  histórica y de los últimos 90 días, para ver en qué rangos has mejorado.
-- **Monotonía y tensión semanal** (Runalyze): monotonía = carga media diaria / desviación típica de
-  la carga de la semana; tensión = carga semanal × monotonía. Aviso cuando la tensión es alta o el
-  entrenamiento es demasiado uniforme, junto a la forma (TSB) en la página de Forma y como widget.
+- **0.5.0** Paquete de análisis (inspirado en Elevate, Runalyze e intervals.icu): progresión anual
+  acumulada, ritmo ajustado a la pendiente (GAP), kilometraje de zapatillas, curva de ritmo, y
+  monotonía y tensión semanal.
 
 ## Más adelante
 
+- **Importar las zapatillas de Garmin Connect** (el «equipo» que ya tengas dado de alta allí) y su
+  asignación a cada actividad.
 - **Face ID con passkeys**: iniciar sesión con Face ID / huella mediante WebAuthn. Requiere entrar
   por HTTPS con un nombre de dominio (certificados HTTPS de Tailscale:
   `https://<servidor>.<red>.ts.net`). La contraseña quedaría como respaldo.

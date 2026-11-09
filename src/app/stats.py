@@ -5,11 +5,12 @@ Todas las funciones reciben `uid` y sólo leen datos de ese usuario.
 from datetime import date, timedelta
 
 from . import db, metrics
+from . import shoes as shoes_mod
 from .config import RECORD_DISTANCES
 
 RUN_COLS = ("id, name, sport, date, start_local, distance_m, moving_s, duration_s, avg_speed, "
             "avg_hr, max_hr, elev_gain, cadence, training_load, aerobic_te, anaerobic_te, vo2max, "
-            "calories, fit_status, source")
+            "calories, fit_status, source, gap_pace, shoe_id")
 
 HEALTH_COLS = ("date, sleep_s, sleep_score, deep_s, rem_s, light_s, awake_s, hrv_night, hrv_weekly, "
                "hrv_status, hrv_low, hrv_high, rhr, bb_high, bb_low, bb_last, stress_avg, steps, readiness, "
@@ -120,7 +121,19 @@ def home(uid: int):
         "last_track": last_track,
         "records": [{"label": r["label"], "distance": r["distance"], "best": r["top"][0] if r["top"] else None,
                      "best_year": r["best_year"]} for r in records(uid)],
+        "progression": _home_progression(uid),
+        "shoes": [x for x in shoes_mod.list_shoes(uid) if not x["retired"]],
+        "monotony": metrics.monotony_strain(uid, weeks=8),
     }
+
+
+def _home_progression(uid: int):
+    p = progression(uid, "distance")
+    this_year = date.today().year
+    keep = [y for y in p["years"] if y["year"] in (this_year, this_year - 1)]
+    return {"years": keep, "today_doy": p["today_doy"],
+            "best": max(p["years"], key=lambda y: y["total"], default=None) and
+            {k: v for k, v in max(p["years"], key=lambda y: y["total"]).items() if k != "series"}}
 
 
 def stats(uid: int, group="month"):
@@ -158,3 +171,51 @@ def stats(uid: int, group="month"):
 def health(uid: int, days=90):
     since = (date.today() - timedelta(days=days - 1)).isoformat()
     return db.rows(f"SELECT {HEALTH_COLS} FROM daily_health WHERE user_id=? AND date>=? ORDER BY date", (uid, since))
+
+
+# ---------- progresión anual acumulada ----------
+def progression(uid: int, metric="distance"):
+    """Acumulado de cada año por día del año (1..366), para comparar años entre sí."""
+    col = {"distance": "distance_m / 1000.0", "time": "moving_s / 3600.0", "elev": "elev_gain"}[metric]
+    rows = db.rows(f"SELECT date, SUM({col}) v FROM activities WHERE user_id=? AND is_run=1 AND date IS NOT NULL "
+                   "GROUP BY date ORDER BY date", (uid,))
+    today = date.today()
+    years = {}
+    for r in rows:
+        d = date.fromisoformat(r["date"])
+        years.setdefault(d.year, {})[d.timetuple().tm_yday] = r["v"] or 0
+    out = []
+    for y in sorted(years):
+        last_day = today.timetuple().tm_yday if y == today.year else (366 if date(y, 12, 31).timetuple().tm_yday == 366 else 365)
+        acc, series = 0.0, []
+        for doy in range(1, last_day + 1):
+            acc += years[y].get(doy, 0)
+            series.append(round(acc, 2))
+        out.append({"year": y, "series": series, "total": round(acc, 1)})
+    # comparación a la misma fecha
+    doy = today.timetuple().tm_yday
+    compare = [{"year": x["year"], "value": x["series"][min(doy, len(x["series"])) - 1] if x["series"] else 0}
+               for x in out]
+    return {"metric": metric, "years": out, "today_doy": doy, "same_date": compare}
+
+
+# ---------- curva de ritmo ----------
+def pace_curve(uid: int, recent_days=90):
+    """Mejor ritmo sostenido para cada duración: histórico, últimos N días y este año."""
+    since = (date.today() - timedelta(days=recent_days)).isoformat()
+    year0 = f"{date.today().year}-01-01"
+
+    def best(where="", params=()):
+        rows = db.rows("SELECT b.duration_s, b.dist_m, a.id, a.name, a.date FROM best_durations b "
+                       "JOIN activities a ON a.id=b.activity_id "
+                       f"WHERE a.user_id=? {where} ORDER BY b.duration_s, b.dist_m DESC", (uid, *params))
+        out = {}
+        for r in rows:
+            if r["duration_s"] not in out:  # el primero de cada duración es el de más distancia
+                out[r["duration_s"]] = {"duration": r["duration_s"], "dist": r["dist_m"],
+                                        "pace": round(r["duration_s"] / (r["dist_m"] / 1000), 1),
+                                        "id": r["id"], "name": r["name"], "date": r["date"]}
+        return [out[k] for k in sorted(out)]
+
+    return {"all": best(), "recent": best("AND a.date>=?", (since,)), "year": best("AND a.date>=?", (year0,)),
+            "recent_days": recent_days}

@@ -110,6 +110,8 @@ def save_activity(uid: int, row: dict):
     db.upsert("activities", row, "id")
     if not existing:
         _merge_manual_duplicate(uid, row)
+        if row.get("is_run"):
+            assign_default_shoe(uid, row["id"])
 
 
 def _merge_manual_duplicate(uid, row):
@@ -129,7 +131,12 @@ def _merge_manual_duplicate(uid, row):
     with db.tx() as con:
         con.execute("UPDATE streams SET activity_id=? WHERE activity_id=?", (row["id"], dup["id"]))
         con.execute("UPDATE best_efforts SET activity_id=? WHERE activity_id=?", (row["id"], dup["id"]))
-        con.execute("UPDATE activities SET fit_status='ok' WHERE id=?", (row["id"],))
+        con.execute("UPDATE best_durations SET activity_id=? WHERE activity_id=?", (row["id"], dup["id"]))
+        con.execute("UPDATE activities SET fit_status='ok', "
+                    "gap_pace=(SELECT gap_pace FROM activities WHERE id=?), "
+                    "derived_v=(SELECT derived_v FROM activities WHERE id=?), "
+                    "shoe_id=COALESCE(shoe_id, (SELECT shoe_id FROM activities WHERE id=?)) WHERE id=?",
+                    (dup["id"], dup["id"], dup["id"], row["id"]))
         con.execute("DELETE FROM activities WHERE id=?", (dup["id"],))
 
 
@@ -247,7 +254,15 @@ def sync_snapshot(uid, g, state):
 
 def store_stream(activity_id, stream):
     db.save_stream(activity_id, stream)
-    metrics.store_best_efforts(activity_id, stream)
+    metrics.store_derived(activity_id, stream)
+
+
+def assign_default_shoe(uid: int, activity_id: int):
+    """Las carreras nuevas se asignan a la zapatilla por defecto del usuario, si tiene."""
+    shoe = db.one("SELECT id FROM shoes WHERE user_id=? AND is_default=1 AND retired=0", (uid,))
+    if shoe:
+        db.execute("UPDATE activities SET shoe_id=? WHERE id=? AND user_id=? AND is_run=1 AND shoe_id IS NULL",
+                   (shoe["id"], activity_id, uid))
 
 
 def sync_fit_files(uid, g, state):
@@ -340,7 +355,17 @@ def scheduler_loop():
         _wake.clear()
 
 
+def _backfill():
+    try:
+        n = metrics.backfill_derived()
+        if n:
+            log.info("Recalculados GAP y curva de ritmo de %s carreras", n)
+    except Exception:  # noqa: BLE001
+        log.exception("Recalculando datos derivados")
+
+
 def start_scheduler():
+    threading.Thread(target=_backfill, daemon=True, name="backfill").start()
     threading.Thread(target=scheduler_loop, daemon=True, name="sync").start()
 
 
@@ -389,5 +414,7 @@ def import_fit(uid: int, blob: bytes) -> list[dict]:
             }, "id")
         store_stream(aid, parsed["stream"])
         db.execute("UPDATE activities SET fit_status='ok' WHERE id=?", (aid,))
+        if not match:
+            assign_default_shoe(uid, aid)
         results.append({"ok": True, "id": aid, "merged": bool(match)})
     return results
