@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Modo Guerrero</title>
+  <meta name="theme-color" content="#0f1216">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23ff6b2c'/><path d='M8 22l6-12 4 8 3-5 3 9' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="stylesheet" href="/static/vendor/leaflet.css">
+  <link rel="stylesheet" href="/static/app.css?v=__VERSION__">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M8 22l6-12 4 8 3-5 3 9" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Modo Guerrero</span><small id="version">v__VERSION__</small>
+    </a>
+    <nav id="nav">
+      <a href="#/" data-route="home">Inicio</a>
+      <a href="#/carreras" data-route="carreras">Carreras</a>
+      <a href="#/salud" data-route="salud">Salud</a>
+      <a href="#/forma" data-route="forma">Forma</a>
+      <a href="#/records" data-route="records">Récords</a>
+      <a href="#/stats" data-route="stats">Estadísticas</a>
+      <a href="#/ajustes" data-route="ajustes">Ajustes</a>
+    </nav>
+    <button id="syncBtn" class="sync-pill" title="Sincronizar ahora">
+      <span class="dot"></span><span id="syncText">…</span>
+    </button>
+  </header>
+  <div id="banner" class="banner" hidden></div>
+  <main id="view"></main>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/static/vendor/echarts.min.js"></script>
+  <script src="/static/vendor/leaflet.js"></script>
+  <script src="/static/vendor/Sortable.min.js"></script>
+  <script src="/static/app.js?v=__VERSION__"></script>
+</body>
+</html>

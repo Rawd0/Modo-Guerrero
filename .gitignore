@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+data/*.db*
+src/data/
+*.zip
+!modo-guerrero-app/data/.gitkeep

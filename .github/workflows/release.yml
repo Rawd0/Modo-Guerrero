@@ -1,0 +1,76 @@
+name: Publicar versión
+
+# Se lanza al crear una etiqueta vX.Y.Z (por ejemplo desde "Releases → Draft a new release").
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Datos de la versión
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$OWNER/modo-guerrero" >> "$GITHUB_OUTPUT"
+          # Notas: el texto del Release de GitHub, o si no el mensaje de la etiqueta
+          sleep 5
+          gh release view "$GITHUB_REF_NAME" --json body -q .body > notes.txt 2>/dev/null || true
+          if [ ! -s notes.txt ]; then git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.txt; fi
+          cat notes.txt
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construir y publicar la imagen (amd64 + arm64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: src
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: APP_VERSION=${{ steps.v.outputs.version }}
+          tags: |
+            ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+            ${{ steps.v.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.v.outputs.version }}
+            org.opencontainers.image.title=Modo Guerrero
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Actualizar la ficha de Umbrel
+        run: |
+          git checkout main
+          git pull --ff-only origin main
+          python scripts/update_umbrel_app.py "${{ steps.v.outputs.version }}" \
+            "${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}@${{ steps.build.outputs.digest }}" notes.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add modo-guerrero-app
+          git commit -m "Umbrel: versión ${{ steps.v.outputs.version }}" || echo "Sin cambios"
+          git push origin main
