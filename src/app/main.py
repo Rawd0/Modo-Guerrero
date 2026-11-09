@@ -4,10 +4,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, db, garmin_auth, metrics, shoes, stats, sync
+from . import auth, backup, db, garmin_auth, metrics, shoes, stats, sync
 from .config import APP_NAME, DEFAULT_SETTINGS, VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -19,6 +19,7 @@ STATIC = Path(__file__).parent / "static"
 async def lifespan(_app):
     db.init()
     sync.start_scheduler()
+    backup.start_scheduler()
     yield
 
 
@@ -183,6 +184,56 @@ def admin_delete(request: Request, user_id: int):
     except auth.AuthFailed as e:
         raise HTTPException(400, str(e))
     return {"ok": True}
+
+
+# ---------- copias de seguridad (sólo administradores: contienen los datos de todos) ----------
+def _bk(fn, *a):
+    try:
+        return fn(*a)
+    except backup.BackupError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/admin/backups")
+def backups_list():
+    return backup.summary()
+
+
+@app.post("/api/admin/backups")
+def backups_create():
+    return _bk(backup.create, "manual")
+
+
+@app.put("/api/admin/backups/settings")
+def backups_settings(payload: dict = Body(...)):
+    return _bk(backup.save_settings, payload)
+
+
+@app.get("/api/admin/backups/{name}")
+def backups_download(name: str):
+    p = _bk(backup.path_for, name)
+    return FileResponse(p, media_type="application/gzip", filename=name)
+
+
+@app.delete("/api/admin/backups/{name}")
+def backups_delete(name: str):
+    _bk(backup.delete, name)
+    return {"ok": True}
+
+
+@app.post("/api/admin/backups/{name}/restore")
+def backups_restore(name: str):
+    return _bk(backup.restore_file, _bk(backup.path_for, name))
+
+
+@app.post("/api/admin/backups-restore-upload")
+async def backups_restore_upload(file: UploadFile = File(...)):
+    import tempfile
+    with tempfile.NamedTemporaryFile(dir=backup.BACKUP_DIR, suffix=".upload", delete=True) as tmp:
+        while chunk := await file.read(1024 * 1024):
+            tmp.write(chunk)
+        tmp.flush()
+        return _bk(backup.restore_file, Path(tmp.name))
 
 
 # ---------- estado y sincronización (siempre del usuario de la sesión) ----------

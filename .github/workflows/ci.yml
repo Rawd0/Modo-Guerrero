@@ -52,6 +52,9 @@ jobs:
           curl -fs -b jar -H "$H" -H "Content-Type: application/json" \
             -d '{"name":"CI","start_date":"2000-01-01","is_default":true,"assign_existing":true}' localhost:8080/api/shoes
           test "$(curl -fs -b jar localhost:8080/api/shoes | python -c "import sys,json;print(json.load(sys.stdin)[0]['runs']>0)")" = "True" || { echo "Zapatillas sin carreras"; exit 1; }
+          # copia de seguridad: crear, descargar (debe ser una base SQLite) y comprobar que se lista
+          name=$(curl -fs -b jar -X POST -H "$H" localhost:8080/api/admin/backups | python -c "import sys,json;print(json.load(sys.stdin)['name'])")
+          curl -fs -b jar "localhost:8080/api/admin/backups/$name" | gunzip | head -c 15 | grep -q "SQLite format 3" || { echo "La copia no es válida"; exit 1; }
           # un segundo usuario no ve los datos del primero
           curl -fs -b jar -H "$H" -H "Content-Type: application/json" \
             -d '{"username":"ci-otro","password":"temporal-de-prueba"}' localhost:8080/api/admin/users
@@ -64,6 +67,7 @@ jobs:
           test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' localhost:8080/api/activities/$id)" = "404" || { echo "El segundo usuario abre una carrera ajena"; exit 1; }
           test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' localhost:8080/api/admin/users)" = "403" || { echo "Un usuario normal entra en la administración"; exit 1; }
           test "$(curl -fs -b jar2 localhost:8080/api/shoes)" = "[]" || { echo "El segundo usuario ve zapatillas ajenas"; exit 1; }
+          test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' localhost:8080/api/admin/backups/$name)" = "403" || { echo "Un usuario normal descarga copias"; exit 1; }
           # sin la cabecera anti-CSRF, las escrituras se rechazan
           test "$(curl -s -b jar -o /dev/null -w '%{http_code}' -X POST localhost:8080/api/sync)" = "403" || { echo "Falta protección CSRF"; exit 1; }
           curl -fs localhost:8080/ | grep -q "vci" || { echo "La versión no aparece en la página"; exit 1; }

@@ -1054,6 +1054,7 @@ route("zapatillas", async (view) => {
 route("ajustes", async (view) => {
   const [st, set, log, sessions, users] = await Promise.all([api("/api/status"), api("/api/settings"), api("/api/sync/log"),
     api("/api/account/sessions"), ME && ME.is_admin ? api("/api/admin/users") : Promise.resolve(null)]);
+  const bk = ME && ME.is_admin ? await api("/api/admin/backups") : null;
   view.innerHTML = `
     <div class="page-head"><div><h1>Ajustes</h1><div class="sub">Modo Guerrero v${esc(st.version)}</div></div></div>
     <div class="grid">
@@ -1147,6 +1148,7 @@ route("ajustes", async (view) => {
         <div class="faint" style="font-size:12px;margin-top:6px">Pásale el usuario y la contraseña temporal. Al entrar por primera vez tendrá que elegir la suya y conectar su propia cuenta de Garmin.</div>
         <div id="nuMsg" style="margin-top:8px"></div>
       </div>` : ""}
+      ${bk ? backupCard(bk) : ""}
       <div class="card wide" style="grid-column:1/-1"><h3>Historial de sincronizaciones</h3>
         <div class="table-wrap log" style="border:0"><table><thead><tr><th class="l">Inicio</th><th class="l">Estado</th><th class="l">Resultado</th></tr></thead>
         <tbody>${log.map((l) => `<tr><td class="l num">${esc((l.started || "").replace("T", " "))}</td><td class="l">${{ ok: '<span class="tag good">Correcta</span>', running: '<span class="tag accent">En curso</span>', auth: '<span class="tag bad">Sesión</span>', rate: '<span class="tag warn">Límite</span>' }[l.status] || '<span class="tag bad">Error</span>'}</td><td class="l">${esc(l.message || "")}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Todavía no ha habido sincronizaciones.</td></tr>`}</tbody></table></div>
@@ -1155,6 +1157,7 @@ route("ajustes", async (view) => {
   garminBox($("#garminBox"), st);
   $("#logoutBtn").onclick = logout;
   if (users) setupUserAdmin();
+  if (bk) setupBackups(bk);
   const saveAppearance = async (theme, accent) => {
     applyTheme(theme, accent);
     await api("/api/settings", { method: "PUT", body: { theme, accent } });
@@ -1198,6 +1201,83 @@ route("ajustes", async (view) => {
     } catch (e) { $("#upRes").innerHTML = `<span class="tag bad">${esc(e.message)}</span>`; }
   }
 });
+
+function fsize(b) {
+  return b > 1024 ** 3 ? `${nf1.format(b / 1024 ** 3)} GB` : b > 1024 ** 2 ? `${nf1.format(b / 1024 ** 2)} MB` : `${nf0.format(b / 1024)} KB`;
+}
+function backupCard(bk) {
+  const st = bk.settings, last = bk.backups[0];
+  const kind = { auto: `<span class="tag">Automática</span>`, manual: `<span class="tag blue">Manual</span>`, "pre-restore": `<span class="tag warn">Antes de restaurar</span>` };
+  return `<div class="card wide" style="grid-column:1/-1"><h3>Copias de seguridad ${st.enabled ? `<span class="tag good">Activadas</span>` : `<span class="tag bad">Desactivadas</span>`}</h3>
+    <p class="muted" style="font-size:13px;margin-top:0">${last ? `Última copia ${esc(timeAgo(last.created))} (${fdate(last.created)} ${last.created.slice(11, 16)})` : "Todavía no hay copias"} ·
+      ${bk.backups.length} ${bk.backups.length === 1 ? "copia" : "copias"}, ${fsize(bk.total_size)} en total${st.enabled && bk.state.next_run ? ` · próxima automática: ${esc(bk.state.next_run.replace("T", " "))}` : ""}</p>
+    ${bk.state.last_error ? `<p class="tag bad" style="white-space:normal">Último error: ${esc(bk.state.last_error)}</p>` : ""}
+    <div class="form-grid">
+      <label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="bkOn" ${st.enabled ? "checked" : ""}> Copia automática diaria</label>
+      <label class="field">Hora<select id="bkHour">${Array.from({ length: 24 }, (_, h) => `<option value="${h}" ${h === st.hour ? "selected" : ""}>${String(h).padStart(2, "0")}:00</option>`).join("")}</select></label>
+      <label class="field">Diarias a conservar<input type="number" id="bkD" min="1" max="60" value="${st.keep_daily}"></label>
+      <label class="field">Semanales<input type="number" id="bkW" min="0" max="52" value="${st.keep_weekly}"></label>
+      <label class="field">Mensuales<input type="number" id="bkM" min="0" max="60" value="${st.keep_monthly}"></label>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="bkSave">Guardar ajustes</button><button class="btn primary" id="bkNow">Crear copia ahora</button>
+      <label class="btn ghost" style="cursor:pointer">Restaurar desde archivo…<input type="file" id="bkUpload" accept=".gz,.db.gz" hidden></label></div>
+    <div id="bkMsg" style="margin-top:8px"></div>
+    ${bk.backups.length ? `<div class="table-wrap" style="border:0;margin-top:8px;max-height:360px;overflow:auto"><table>
+      <thead><tr><th class="l">Fecha</th><th class="l">Tipo</th><th class="l">Versión</th><th>Tamaño</th><th></th></tr></thead>
+      <tbody>${bk.backups.map((b) => `<tr>
+        <td class="l num">${fdate(b.created)} ${b.created.slice(11, 16)}</td><td class="l">${kind[b.kind] || ""}</td>
+        <td class="l faint">v${esc(b.version)}</td><td class="num">${fsize(b.size)}</td>
+        <td><a class="btn small ghost" href="/api/admin/backups/${encodeURIComponent(b.name)}" download>Descargar</a>
+          <button class="btn small ghost" data-bkrestore="${esc(b.name)}">Restaurar</button>
+          <button class="btn small ghost" data-bkdel="${esc(b.name)}" style="color:var(--bad)">Borrar</button></td></tr>`).join("")}</tbody></table></div>` : ""}
+    <p class="faint" style="font-size:12px;margin:10px 0 0">Las copias incluyen los datos de todos los usuarios y se guardan en la carpeta de datos de la app, en este mismo disco.
+      Para protegerte de un fallo del disco, descarga de vez en cuando una copia a otro sitio. La clave que cifra las conexiones con Garmin no va dentro de la copia:
+      si restauras en otro servidor, cada usuario tendrá que volver a conectar Garmin.</p>
+  </div>`;
+}
+
+function setupBackups(bk) {
+  const msg = (h) => ($("#bkMsg").innerHTML = h);
+  $("#bkSave").onclick = async () => {
+    try {
+      await api("/api/admin/backups/settings", { method: "PUT", body: { enabled: $("#bkOn").checked, hour: +$("#bkHour").value,
+        keep_daily: +$("#bkD").value, keep_weekly: +$("#bkW").value, keep_monthly: +$("#bkM").value } });
+      toast("Ajustes de copias guardados"); rerender();
+    } catch (e) { msg(`<p class="tag bad">${esc(e.message)}</p>`); }
+  };
+  $("#bkNow").onclick = async () => {
+    const b = $("#bkNow"); b.disabled = true; b.textContent = "Creando copia…";
+    try { const r = await api("/api/admin/backups", { method: "POST" }); toast(`Copia creada (${fsize(r.size)})`); rerender(); }
+    catch (e) { msg(`<p class="tag bad">${esc(e.message)}</p>`); b.disabled = false; b.textContent = "Crear copia ahora"; }
+  };
+  const afterRestore = (r) => {
+    msg(`<p class="tag good" style="white-space:normal">Copia restaurada: ${r.users} usuario(s), ${int(r.runs)} carreras. Se guardó antes una copia del estado anterior por si quieres deshacerlo. Recargando…</p>`);
+    setTimeout(() => location.reload(), 2500);
+  };
+  const confirmRestore = (what) => {
+    const t = prompt(`Vas a restaurar ${what}.\n\nTODOS los datos actuales de TODOS los usuarios se sustituirán por los de la copia (antes se guardará automáticamente una copia del estado actual). Puede que tengas que volver a iniciar sesión.\n\nEscribe RESTAURAR para confirmar:`);
+    return t !== null && t.trim().toUpperCase() === "RESTAURAR";
+  };
+  $$("[data-bkrestore]").forEach((b) => (b.onclick = async () => {
+    if (!confirmRestore(`la copia del ${b.closest("tr").children[0].textContent}`)) return;
+    msg(`<p class="muted">Restaurando…</p>`);
+    try { afterRestore(await api(`/api/admin/backups/${encodeURIComponent(b.dataset.bkrestore)}/restore`, { method: "POST" })); }
+    catch (e) { msg(`<p class="tag bad" style="white-space:normal">${esc(e.message)}</p>`); }
+  }));
+  $("#bkUpload").onchange = async (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f || !confirmRestore(`el archivo «${f.name}»`)) return;
+    const fd = new FormData(); fd.append("file", f);
+    msg(`<p class="muted">Subiendo y comprobando la copia…</p>`);
+    try { afterRestore(await api("/api/admin/backups-restore-upload", { method: "POST", body: fd })); }
+    catch (err) { msg(`<p class="tag bad" style="white-space:normal">${esc(err.message)}</p>`); }
+  };
+  $$("[data-bkdel]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("¿Borrar esta copia de seguridad? No se puede deshacer.")) return;
+    try { await api(`/api/admin/backups/${encodeURIComponent(b.dataset.bkdel)}`, { method: "DELETE" }); rerender(); }
+    catch (e) { toast(e.message, true); }
+  }));
+}
 
 function tempPassword() {
   // contraseña temporal legible: 4 grupos de 4 caracteres sin ambigüedades (0/O, 1/l)

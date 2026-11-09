@@ -208,7 +208,8 @@ def _migrate(con):
     if _exists(con, "users") and "must_change" not in _cols(con, "users"):
         con.execute("ALTER TABLE users ADD COLUMN must_change INTEGER DEFAULT 0")
     # los ajustes de antes (cuenta de Garmin, objetivos, inicio, tema...) eran de la única persona
-    if _exists(con, "settings"):
+    # (sólo al venir de < 0.4.0; desde entonces la tabla settings guarda ajustes globales de la app)
+    if version < 2 and _exists(con, "settings"):
         con.executescript(SCHEMA)
         con.execute("INSERT OR IGNORE INTO user_settings (user_id, key, value) SELECT 0, key, value FROM settings")
         con.execute("DELETE FROM settings")
@@ -277,6 +278,16 @@ def upsert(table, data: dict, key):
            f"ON CONFLICT({','.join(keys)}) DO " + (f"UPDATE SET {updates}" if updates else "NOTHING"))
     with tx() as con:
         con.execute(sql, [data[c] for c in cols])
+
+
+# ---------- ajustes globales de la app (no de un usuario) ----------
+def get_global(key, default=None):
+    r = one("SELECT value FROM settings WHERE key=?", (key,))
+    return json.loads(r["value"]) if r else default
+
+
+def set_global(key, value):
+    upsert("settings", {"key": key, "value": json.dumps(value)}, "key")
 
 
 # ---------- ajustes de cada usuario ----------

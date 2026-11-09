@@ -25,6 +25,18 @@ temporal. Cada persona elige la suya al entrar por primera vez, conecta su propi
 tiene sus propios datos y ajustes; nadie ve los datos de otro. Tus datos se guardan en la carpeta de datos de la app
 en Umbrel y se conservan entre actualizaciones.
 
+## Copias de seguridad
+
+En **Ajustes → Copias de seguridad** (sólo administradores):
+
+- Copia automática diaria a la hora que elijas; se conservan 7 diarias, 4 semanales y 6 mensuales
+  (configurable). Las copias manuales y las previas a una restauración no se borran solas.
+- Botones para crear una copia al momento, descargarla, borrarla o restaurarla, y para restaurar
+  desde un archivo descargado antes.
+- Al restaurar, la app guarda primero una copia del estado actual, por si hay que deshacerlo.
+- Las copias van en la carpeta de datos de la app (`backups/`), en el mismo disco: descarga una de
+  vez en cuando a otro sitio. La clave que cifra las conexiones con Garmin no va dentro de la copia.
+
 ## Actualizar
 
 Cuando se publica una versión nueva, Umbrel la muestra como actualización disponible de Modo Guerrero.
