@@ -4,3 +4,5 @@ data/*.db*
 src/data/
 *.zip
 !modo-guerrero-app/data/.gitkeep
+src/jar
+src/jar2
