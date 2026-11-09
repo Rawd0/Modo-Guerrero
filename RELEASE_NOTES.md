@@ -1,8 +1,9 @@
-Objetivos de carrera.
+Plan de entrenamiento.
 
-- Nueva sección «Objetivos»: añade tus carreras con fecha, distancia, tiempo objetivo y prioridad (A, B o C).
-- Predicción de tu tiempo con tu forma actual por tres métodos: VDOT de Jack Daniels, fórmula de Riegel y la predicción de Garmin, con una estimación central. Te dice si tu objetivo es ambicioso, realista o conservador.
-- Forma prevista hasta el día de la carrera: proyección de fitness, fatiga y forma (TSB) manteniendo tu carga actual y con el afinamiento recomendado para la distancia, comparada con no afinar, y el rango ideal de forma según la prioridad.
-- Lista de preparación: tirada larga, volumen semanal, frecuencia y forma prevista frente a lo recomendado para la distancia.
-- Al pasar la carrera, se enlaza sola la actividad de ese día y se compara el resultado con tu objetivo y con la predicción que tenías.
-- Nuevo widget «Próxima carrera» en el inicio, con la cuenta atrás.
+- Cada carrera objetivo puede tener su plan: eliges los días por semana (3 a 6), el día de la tirada larga y los km semanales de partida (se proponen los de tus últimas 4 semanas).
+- El plan se reparte en fases (base, construcción, pico y afinamiento) según las semanas que quedan, sube el volumen como mucho un 8 % por semana, mete una semana de descarga cada cuatro y afina antes de la carrera.
+- Sesiones concretas con distancia y ritmos: rodajes suaves, tirada larga, series, umbral, fartlek, rectas y tramos a ritmo de carrera, con los ritmos de entrenamiento de Jack Daniels para tu VDOT y tu ritmo objetivo. La víspera, activación.
+- Seguimiento automático: al sincronizar, la sesión del día queda hecha con tu carrera; las pasadas sin actividad, como no hechas. Puedes marcarlas, saltarlas o moverlas de día.
+- Cumplimiento por semana y total, y gráfica de kilómetros previstos frente a hechos.
+- «Ajustar plan» rehace lo pendiente con tu forma actual sin perder lo ya hecho.
+- Nuevo widget «Hoy toca» en el inicio, con la sesión del día y los puntos de la semana.

@@ -139,7 +139,11 @@ def set_result(uid: int, race_id: int, activity_id):
 
 def delete(uid: int, race_id: int):
     _own(uid, race_id)
-    db.execute("DELETE FROM races WHERE id=? AND user_id=?", (race_id, uid))
+    with db.tx() as con:
+        for (pid,) in con.execute("SELECT id FROM training_plans WHERE user_id=? AND race_id=?", (uid, race_id)).fetchall():
+            con.execute("DELETE FROM plan_sessions WHERE plan_id=?", (pid,))
+            con.execute("DELETE FROM training_plans WHERE id=?", (pid,))
+        con.execute("DELETE FROM races WHERE id=? AND user_id=?", (race_id, uid))
 
 
 # ---------- predicciones ----------
@@ -299,7 +303,8 @@ def summary(uid: int, race: dict) -> dict:
 
 def list_races(uid: int):
     auto_link_results(uid)
-    rows = db.rows("SELECT * FROM races WHERE user_id=? ORDER BY date", (uid,))
+    rows = db.rows("SELECT r.*, EXISTS(SELECT 1 FROM training_plans p WHERE p.race_id=r.id) has_plan "
+                   "FROM races r WHERE r.user_id=? ORDER BY r.date", (uid,))
     today = date.today().isoformat()
     upcoming = [summary(uid, r) for r in rows if r["date"] >= today]
     past = [summary(uid, r) for r in reversed(rows) if r["date"] < today]
@@ -319,6 +324,7 @@ def detail(uid: int, race_id: int):
         s["checklist"] = checklist(uid, r, s["prediction"], proj)
     s["candidates"] = db.rows("SELECT id, name, distance_m, moving_s FROM activities WHERE user_id=? AND is_run=1 AND date=?",
                               (uid, r["date"]))
+    s["has_plan"] = bool(db.one("SELECT 1 x FROM training_plans WHERE user_id=? AND race_id=?", (uid, race_id)))
     return s
 
 

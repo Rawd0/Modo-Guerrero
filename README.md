@@ -3,7 +3,7 @@
 Panel autoalojado de carrera a pie con tus datos de Garmin Connect, pensado para Umbrel:
 carreras con mapa, gráficas y parciales, ritmo ajustado a la pendiente (GAP), récords personales
 y curva de ritmo, forma y carga (CTL/ATL/TSB), monotonía y tensión semanal, progresión anual
-año contra año, kilometraje de zapatillas, objetivos de carrera con predicción y proyección de forma, VO2max, sueño, VFC, pulso en reposo, Body Battery y
+año contra año, kilometraje de zapatillas, objetivos de carrera con predicción, proyección de forma y plan de entrenamiento, VO2max, sueño, VFC, pulso en reposo, Body Battery y
 estrés, con una página de inicio personalizable mediante widgets.
 
 Este repositorio es a la vez **el código de la app** y **una tienda comunitaria de Umbrel**.

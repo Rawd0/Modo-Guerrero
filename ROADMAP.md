@@ -16,6 +16,8 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
 - **0.6.1** Nuevo icono (G con pulso y laurel) y cabecera MODO / GUERRERO.
 - **0.7.0** Objetivos de carrera: predicción según tu forma (VDOT de Daniels, Riegel y Garmin),
   proyección de la forma con afinamiento hasta el día, lista de preparación y resultado automático.
+- **0.8.0** Plan de entrenamiento para cada objetivo: fases, volumen progresivo con descargas,
+  sesiones con ritmos de Daniels, seguimiento automático de lo hecho y widget «Hoy toca».
 
 ## Más adelante
 
@@ -35,5 +37,5 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
 - **Comparar dos periodos** lado a lado (intervals.icu).
 - **Rutas repetidas** detectadas automáticamente y tu evolución en ellas (intervals.icu).
 - **Preguntas en lenguaje natural** sobre tus datos usando un modelo local (Ollama).
-- **Plan de entrenamiento** para un objetivo: semanas, sesiones y seguimiento de lo hecho frente a lo
-  previsto.
+- **Plan de entrenamiento, siguiente paso:** comprobar si cada sesión se hizo al ritmo previsto
+  (series y tramos a partir de las vueltas) y exportar las sesiones al reloj como entrenamientos de Garmin.

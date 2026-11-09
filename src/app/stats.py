@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from . import db, metrics
 from . import shoes as shoes_mod
 from . import races as races_mod
+from . import plans as plans_mod
 from .config import RECORD_DISTANCES
 
 RUN_COLS = ("id, name, sport, date, start_local, distance_m, moving_s, duration_s, avg_speed, "
@@ -126,6 +127,7 @@ def home(uid: int):
         "shoes": [x for x in shoes_mod.list_shoes(uid) if not x["retired"]],
         "monotony": metrics.monotony_strain(uid, weeks=8),
         "next_race": races_mod.next_race(uid),
+        "today_session": plans_mod.today_session(uid),
     }
 
 

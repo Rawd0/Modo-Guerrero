@@ -297,3 +297,35 @@ body { padding-top: var(--sat); padding-bottom: env(safe-area-inset-bottom); }
   .standalone-only { display: inline-flex !important; }
 }
 .standalone-only { display: none !important; }
+
+/* ---- plan de entrenamiento */
+.pweek { margin-bottom: 10px; padding: 0; }
+.pweek > summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 14px 16px; flex-wrap: wrap; }
+.pweek > summary::-webkit-details-marker { display: none; }
+.pweek > summary::before { content: "▸"; color: var(--faint); margin-right: -4px; transition: transform .15s; }
+.pweek[open] > summary::before { transform: rotate(90deg); }
+.pweek > summary > span:first-child { flex: 1; }
+.pweek.current { border-color: var(--accent); }
+.psessions { padding: 0 16px 10px; }
+.psess { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; padding: 10px 0; border-top: 1px dashed var(--line); align-items: start; }
+.psess.today { background: var(--accent-soft); margin: 0 -16px; padding: 10px 16px; border-radius: 8px; }
+.psess.done .pdesc, .psess.skipped .pdesc { opacity: .6; }
+.psess.missed .pday b { color: var(--bad); }
+.psess.done .pday b { color: var(--good); }
+.pday { display: flex; flex-direction: column; font-size: 13px; text-transform: capitalize; }
+.pdesc { font-size: 13.5px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+.pact { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.pact select { font-size: 13px; padding: 4px 6px; }
+.pmove { margin-top: 8px; display: flex; gap: 6px; align-items: center; }
+.pmove input { font-size: 13px; padding: 4px 6px; }
+.wkdots { display: flex; gap: 6px; margin: 12px 0 2px; }
+.wkdot { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 650; background: var(--card-2); color: var(--muted); }
+.wkdot.rest { background: transparent; border: 1px dashed var(--line); color: var(--faint); }
+.wkdot.done { background: var(--good); color: #fff; }
+.wkdot.missed { background: color-mix(in srgb, var(--bad) 25%, transparent); color: var(--bad); }
+.wkdot.skipped { background: transparent; border: 1px solid var(--faint); }
+.wkdot.today { background: var(--accent); color: #fff; }
+@media (max-width: 600px) {
+  .psess { grid-template-columns: 44px 1fr; }
+  .pact { grid-column: 2; flex-direction: row; align-items: center; }
+}

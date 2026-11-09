@@ -38,6 +38,7 @@ DEFAULT_SETTINGS = {
         {"id": "weeks_chart", "visible": True, "wide": True},
         {"id": "year_progress", "visible": True, "wide": True},
         {"id": "next_race", "visible": True, "wide": False},
+        {"id": "today_session", "visible": True, "wide": False},
         {"id": "shoes", "visible": True, "wide": False},
     ],
 }

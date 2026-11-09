@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, backup, db, garmin_auth, metrics, races, shoes, stats, sync
+from . import auth, backup, db, garmin_auth, metrics, plans, races, shoes, stats, sync
 from .config import APP_NAME, DEFAULT_SETTINGS, VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -474,6 +474,41 @@ def update_race(request: Request, race_id: int, payload: dict = Body(...)):
 @app.put("/api/races/{race_id}/result")
 def set_race_result(request: Request, race_id: int, payload: dict = Body(...)):
     _race_call(races.set_result, _uid(request), race_id, payload.get("activity_id"))
+    return {"ok": True}
+
+
+@app.get("/api/races/{race_id}/plan")
+def get_plan(request: Request, race_id: int):
+    try:
+        return plans.get_plan(_uid(request), race_id)
+    except (races.RaceError, plans.PlanError) as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/races/{race_id}/plan")
+def create_plan(request: Request, race_id: int, payload: dict = Body(...)):
+    try:
+        plans.create(_uid(request), race_id, payload)
+    except (races.RaceError, plans.PlanError) as e:
+        raise HTTPException(400, str(e))
+    return plans.get_plan(_uid(request), race_id)
+
+
+@app.delete("/api/races/{race_id}/plan")
+def delete_plan(request: Request, race_id: int):
+    try:
+        plans.delete(_uid(request), race_id)
+    except races.RaceError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
+@app.put("/api/plan-sessions/{session_id}")
+def update_plan_session(request: Request, session_id: int, payload: dict = Body(...)):
+    try:
+        plans.update_session(_uid(request), session_id, payload)
+    except plans.PlanError as e:
+        raise HTTPException(400, str(e))
     return {"ok": True}
 
 

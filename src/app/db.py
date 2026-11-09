@@ -15,7 +15,7 @@ from .config import DB_PATH, DEFAULT_SETTINGS
 
 log = logging.getLogger("guerrero.db")
 _lock = threading.RLock()
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -108,6 +108,27 @@ CREATE TABLE IF NOT EXISTS races (
     created TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_races_user ON races(user_id, date);
+CREATE TABLE IF NOT EXISTS training_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    race_id INTEGER NOT NULL,
+    params TEXT, paces TEXT, weeks TEXT,
+    created TEXT, updated TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_plans_user ON training_plans(user_id, race_id);
+CREATE TABLE IF NOT EXISTS plan_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    type TEXT, title TEXT, description TEXT,
+    distance_km REAL, target_pace REAL,
+    status TEXT DEFAULT 'planned',
+    activity_id INTEGER,
+    manual INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_psess_plan ON plan_sessions(plan_id, date);
+CREATE INDEX IF NOT EXISTS ix_psess_user ON plan_sessions(user_id, date);
 CREATE TABLE IF NOT EXISTS daily_health (
     user_id INTEGER NOT NULL DEFAULT 0,
     date TEXT NOT NULL,
@@ -156,7 +177,8 @@ CREATE INDEX IF NOT EXISTS ix_sync_user ON sync_log(user_id, id);
 """
 
 # tablas con datos de cada usuario (best_efforts y streams cuelgan de activities)
-USER_TABLES = ("activities", "daily_health", "snapshots", "sync_log", "user_settings", "shoes", "races")
+USER_TABLES = ("activities", "daily_health", "snapshots", "sync_log", "user_settings", "shoes", "races",
+               "training_plans", "plan_sessions")
 
 
 def connect():
@@ -247,7 +269,7 @@ def claim_unassigned(user_id: int):
             + con.execute("SELECT COUNT(*) FROM user_settings WHERE user_id=0").fetchone()[0]
         if not n:
             return
-        for t in ("activities", "daily_health", "snapshots", "sync_log", "shoes", "races"):
+        for t in ("activities", "daily_health", "snapshots", "sync_log", "shoes", "races", "training_plans", "plan_sessions"):
             con.execute(f"UPDATE OR IGNORE {t} SET user_id=? WHERE user_id=0", (user_id,))
         con.execute("INSERT OR IGNORE INTO user_settings (user_id, key, value) "
                     "SELECT ?, key, value FROM user_settings WHERE user_id=0", (user_id,))

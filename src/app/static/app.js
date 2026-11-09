@@ -241,7 +241,7 @@ async function rerender() {
   const key = name || "home";
   current = key;
   disposeAll();
-  $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === ({ carrera: "carreras", objetivo: "objetivos" }[key] || key)));
+  $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === ({ carrera: "carreras", objetivo: "objetivos", plan: "objetivos" }[key] || key)));
   const view = $("#view");
   view.innerHTML = `<div class="skeleton"></div>`;
   try {
@@ -267,6 +267,7 @@ const WIDGETS = {
   year_progress: { title: "Progresión del año", render: wYearProgress },
   shoes: { title: "Zapatillas", render: wShoes },
   next_race: { title: "Próxima carrera", render: wNextRace },
+  today_session: { title: "Hoy toca", render: wToday },
 };
 
 route("home", async (view) => {
@@ -524,6 +525,28 @@ function wNextRace(card, d) {
       <div class="kpi"><div class="v num">${r.race_tsb != null ? tsbFmt(r.race_tsb) : "–"}</div><div class="l">Forma prevista <span class="tag ${tsbOk ? "good" : "warn"}" style="font-size:10px;padding:1px 5px">${tsbOk ? "en rango" : "fuera de rango"}</span></div></div>
     </div>
     <a class="more" href="#/objetivo/${r.id}">Ver preparación →</a>`;
+}
+
+function wToday(card, d) {
+  const T = d.today_session;
+  if (!T) {
+    card.innerHTML = `<h3>Hoy toca</h3><div class="muted">Crea un plan de entrenamiento para tu próxima carrera y aquí verás la sesión del día.</div><a class="more" href="#/objetivos">Ir a objetivos →</a>`;
+    return;
+  }
+  const s = T.session;
+  const todayIso = isoToday();
+  const isToday = s && s.date === todayIso;
+  const dots = WEEK_ORDER.map((i) => {
+    const day = T.week.find((x) => new Date(x.date + "T12:00:00").getDay() === i);
+    const cls = !day ? "rest" : day.status === "done" ? "done" : day.status === "missed" ? "missed" : day.status === "skipped" ? "skipped" : day.date === todayIso ? "today" : "";
+    return `<span class="wkdot ${cls}" title="${WEEKDAYS[i]}${day ? " · " + SESSION_TYPES[day.type].label : " · descanso"}">${WEEKDAYS[i][0].toUpperCase()}</span>`;
+  }).join("");
+  card.innerHTML = `<h3>${isToday ? "Hoy toca" : "Próxima sesión"} ${s && s.status === "done" ? `<span class="tag good">Hecha</span>` : ""}</h3>
+    ${s ? `<div class="row" style="gap:8px;align-items:center">${typeTag(s.type)}<span class="mid">${s.type === "race" ? esc(T.race_name) : `${nf1.format(s.distance_km).replace(",0", "")} km`}</span></div>
+      ${isToday ? "" : `<div class="muted" style="font-size:13px;margin-top:2px">${fdate(s.date, false)}</div>`}
+      <p style="margin:8px 0 4px;font-size:14px">${esc(s.description)}</p>` : `<div class="muted">No quedan sesiones pendientes.</div>`}
+    <div class="wkdots">${dots}</div>
+    <a class="more" href="#/plan/${T.race_id}">Ver plan · ${esc(T.race_name)} →</a>`;
 }
 
 function wShoes(card, d) {
@@ -1103,6 +1126,7 @@ route("objetivo", async (view, id) => {
           <span style="font-size:18px">${i.ok ? "✅" : "⚠️"}</span><span>${i.label}<br><span class="faint" style="font-size:12px">recomendado ${typeof i.target === "number" ? (i.id === "freq" ? "≥ " : "≥ ") + i.target + (i.unit ? " " + i.unit : "") : i.target}</span></span>
           <span class="t num">${i.id === "tsb" && i.value > 0 ? "+" : ""}${typeof i.value === "number" ? nf1.format(i.value).replace(",0", "") : i.value}${i.unit ? " " + i.unit : ""}</span></div>`).join("")}</div>
         <p class="faint" style="font-size:12px;margin:8px 0 0">Orientaciones generales para un corredor popular; adáptalas a tu plan y a tu experiencia.</p></div>` : ""}
+      ${upcoming || r.has_plan ? `<div class="card" id="planCard"><h3>Plan de entrenamiento</h3><div class="muted">Cargando…</div></div>` : ""}
       ${upcoming && r.projection ? `<div class="card wide" style="grid-column:1/-1"><h3>Forma prevista hasta el día de la carrera</h3>
         <div class="muted" style="font-size:13px;margin-top:-6px">Suponiendo que mantienes tu carga media de las últimas 4 semanas${r.priority !== "C" ? ` y la reduces al 60 % los últimos ${r.projection.taper_days} días (afinamiento)` : ""}.
           Forma (TSB) el día de la carrera: <b>${tsbFmt(r.projection.race_tsb)}</b>${r.projection_no_taper ? ` · sin afinamiento: ${tsbFmt(r.projection_no_taper.race_tsb)}` : ""}.
@@ -1114,6 +1138,157 @@ route("objetivo", async (view, id) => {
   const rs = $("#resSel");
   if (rs) rs.onchange = async (e) => { await api(`/api/races/${r.id}/result`, { method: "PUT", body: { activity_id: e.target.value || null } }); rerender(); };
   if (upcoming && r.projection) projectionChart($("#projChart"), r);
+  if ($("#planCard")) renderPlanCard($("#planCard"), r);
+});
+
+// ================================================================ PLAN DE ENTRENAMIENTO
+const SESSION_TYPES = {
+  easy: { label: "Suave", cls: "" }, long: { label: "Tirada larga", cls: "blue" }, intervals: { label: "Series", cls: "bad" },
+  tempo: { label: "Umbral", cls: "warn" }, specific: { label: "Ritmo carrera", cls: "accent" }, fartlek: { label: "Fartlek", cls: "warn" },
+  strides: { label: "Suave + rectas", cls: "" }, shakeout: { label: "Activación", cls: "" }, race: { label: "Carrera", cls: "accent" },
+};
+const PHASES = { base: "Base", build: "Construcción", peak: "Pico", taper: "Afinamiento" };
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const PLAN_OPEN = {}; // semanas desplegadas por plan, para no plegarlas al actualizar
+const PSTATUS = { planned: "Pendiente", done: "Hecha", skipped: "Saltada", missed: "No hecha" };
+const typeTag = (t) => `<span class="tag ${(SESSION_TYPES[t] || {}).cls || ""}">${(SESSION_TYPES[t] || { label: t }).label}</span>`;
+function isoToday() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+
+function planFormHtml(params, dflt) {
+  const v = params || dflt || {};
+  return `<form id="planForm" class="form-grid" style="margin-top:8px">
+      <label class="field">Días por semana<select id="pfDays">${[3, 4, 5, 6].map((n) => `<option value="${n}" ${(v.days_per_week || 4) === n ? "selected" : ""}>${n} días</option>`).join("")}</select></label>
+      <label class="field">Tirada larga<select id="pfLong"><option value="6" ${(v.long_day ?? 6) === 6 ? "selected" : ""}>Domingo</option><option value="5" ${v.long_day === 5 ? "selected" : ""}>Sábado</option></select></label>
+      <label class="field">Km semanales de partida<input type="number" id="pfKm" min="5" max="250" step="1" value="${Math.round(v.start_km || 20)}"></label>
+      <div class="row" style="align-self:end"><button class="btn primary">${params ? "Rehacer plan" : "Crear plan"}</button></div>
+    </form><div id="pfMsg"></div>`;
+}
+function setupPlanForm(raceId, done) {
+  $("#planForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = e.target.querySelector("button"); btn.disabled = true;
+    try {
+      await api(`/api/races/${raceId}/plan`, { method: "POST", body: { days_per_week: +$("#pfDays").value, long_day: +$("#pfLong").value, start_km: +$("#pfKm").value } });
+      toast("Plan listo"); done();
+    } catch (err) { $("#pfMsg").innerHTML = `<p class="tag bad" style="white-space:normal">${esc(err.message)}</p>`; btn.disabled = false; }
+  };
+}
+
+async function renderPlanCard(card, r) {
+  const P = await api(`/api/races/${r.id}/plan`);
+  if (!P.plan) {
+    if (!P.defaults) { card.remove(); return; }
+    const D = P.defaults;
+    card.innerHTML = `<h3>Plan de entrenamiento</h3>
+      <div class="muted" style="font-size:14px">Semanas hasta la carrera con sus sesiones y ritmos, ajustadas a tu forma. Las sesiones se marcan solas al sincronizar tus carreras.</div>
+      <div class="faint" style="font-size:12px;margin-top:6px">Ahora corres ${nf1.format(D.current_weekly_km)} km por semana (media de 4 semanas) y tu carrera más larga reciente es de ${nf1.format(D.current_long_km)} km.</div>
+      ${planFormHtml(null, D)}`;
+    setupPlanForm(r.id, () => { location.hash = `#/plan/${r.id}`; });
+    return;
+  }
+  const S = P.summary, cur = P.weeks.find((w) => w.current) || P.weeks.find((w) => !w.past);
+  card.innerHTML = `<h3>Plan de entrenamiento ${cur ? `<span class="tag">${PHASES[cur.phase]}</span>` : ""}</h3>
+    <div class="kpis" style="margin-top:4px">
+      <div class="kpi"><div class="v num">${cur ? cur.index : P.weeks.length}/${P.weeks.length}</div><div class="l">Semana</div></div>
+      <div class="kpi"><div class="v num">${S.sessions_done}/${S.sessions_due}</div><div class="l">Sesiones hechas</div></div>
+      <div class="kpi"><div class="v num">${S.km_planned ? Math.round((100 * S.km_done) / S.km_planned) + "%" : "–"}</div><div class="l">Km cumplidos</div></div>
+    </div>
+    <a class="more" href="#/plan/${r.id}">Ver plan →</a>`;
+}
+
+route("plan", async (view, id) => {
+  const [r, P] = await Promise.all([api(`/api/races/${id}`), api(`/api/races/${id}/plan`)]);
+  if (!P.plan) { location.hash = `#/objetivo/${id}`; return; }
+  const pa = P.plan.paces, S = P.summary, todayIso = isoToday();
+  const paceRow = (l, v, note) => `<div class="rec-row"><span>${l}<br><span class="faint" style="font-size:12px">${note}</span></span><span></span><span class="t num">${v}</span></div>`;
+  const sessionRow = (s) => {
+    const done = s.status === "done", act = s.activity_id && s.act_distance;
+    return `<div class="psess ${s.status} ${s.date === todayIso ? "today" : ""}" data-id="${s.id}">
+      <div class="pday"><b>${WEEKDAYS[new Date(s.date + "T12:00:00").getDay()]}</b><span class="faint">${fdateShort(s.date)}</span></div>
+      <div class="pbody">
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">${typeTag(s.type)}<b class="num">${s.type === "race" ? raceDist(r) : nf1.format(s.distance_km).replace(",0", "") + " km"}</b>
+          ${act ? `<a class="faint" style="font-size:12px" href="#/carrera/${s.activity_id}">✓ ${km(s.act_distance)} km a ${pace(s.act_time / (s.act_distance / 1000))} /km</a>` : ""}</div>
+        <div class="pdesc">${esc(s.description)}</div>
+        <div class="pmove" hidden><input type="date" value="${s.date}"> <button class="btn small" data-act="move">Mover</button></div>
+      </div>
+      ${s.type === "race" ? `<span class="tag ${done ? "good" : ""}">${done ? "Hecha" : "🏁"}</span>` : `<div class="pact">
+        <select data-act="status" title="Estado">${["planned", "done", "skipped"].map((k) => `<option value="${k}" ${s.status === k ? "selected" : ""}>${PSTATUS[k]}</option>`).join("")}${s.status === "missed" ? `<option value="missed" selected disabled>${PSTATUS.missed}</option>` : ""}</select>
+        ${s.status !== "done" ? `<button class="btn small ghost" data-act="showmove" title="Cambiar de día">Mover</button>` : ""}</div>`}
+    </div>`;
+  };
+  const weekHtml = (w) => {
+    const compl = w.compliance;
+    const cls = compl == null ? "" : compl >= 90 ? "good" : compl >= 70 ? "warn" : "bad";
+    const open = PLAN_OPEN[id] ? PLAN_OPEN[id].has(w.index) : w.current || (!P.weeks.some((x) => x.current) && w === P.weeks.find((x) => !x.past));
+    return `<details class="card pweek ${w.current ? "current" : ""}" data-week="${w.index}" ${open ? "open" : ""}>
+      <summary><span><b>Semana ${w.index}</b> · ${PHASES[w.phase]}${w.recovery ? ` <span class="tag">Descarga</span>` : ""}${w.current ? ` <span class="tag accent">Esta semana</span>` : ""}
+        <span class="faint" style="font-size:12px"> · ${fdateShort(w.monday)}</span></span>
+        <span class="num" style="font-size:13px">${w.past || w.current ? `${nf1.format(w.done_km)} / ` : ""}${nf1.format(w.planned_km)} km ${compl != null ? `<span class="tag ${cls}">${compl}%</span>` : ""}</span></summary>
+      <div class="psessions">${w.sessions.map(sessionRow).join("") || `<div class="muted">Sin sesiones.</div>`}</div>
+    </details>`;
+  };
+  view.innerHTML = `
+    <div class="page-head"><div><a class="muted" href="#/objetivo/${r.id}">← ${esc(r.name)}</a><h1>Plan de entrenamiento</h1>
+      <div class="sub">${P.weeks.length} semanas hasta el ${fdate(r.date)} · ${raceDist(r)} · ${P.plan.params.days_per_week} días por semana</div></div>
+      <button class="btn" id="redoPlan">Ajustar plan</button></div>
+    <div class="card" id="redoCard" hidden style="margin-bottom:16px"><h3>Rehacer el plan</h3>
+      <div class="muted" style="font-size:13px">Se rehacen las sesiones pendientes desde hoy con tu forma y ritmos actuales. Lo ya hecho y lo que hayas marcado a mano se conserva.</div>
+      ${planFormHtml(P.plan.params)}
+      <div class="row" style="margin-top:10px"><button class="btn ghost small" id="delPlan" style="color:var(--bad)">Eliminar plan</button></div></div>
+    <div class="grid">
+      <div class="card" style="align-self:start"><h3>Cumplimiento</h3>
+        <div class="kpis" style="margin-top:4px">
+          <div class="kpi"><div class="v num">${S.sessions_done}/${S.sessions_due}</div><div class="l">Sesiones hechas</div></div>
+          <div class="kpi"><div class="v num">${nf0.format(S.km_done)}<small style="font-size:12px"> / ${nf0.format(S.km_planned)}</small></div><div class="l">Km hasta hoy</div></div>
+          <div class="kpi"><div class="v num">${S.km_planned ? Math.round((100 * S.km_done) / S.km_planned) + "%" : "–"}</div><div class="l">Del volumen previsto</div></div>
+        </div>
+        <p class="faint" style="font-size:12px;margin:10px 0 0">Una sesión se da por hecha si ese día hay una carrera tuya. Puedes cambiar el estado o moverla de día.</p></div>
+      <div class="card" style="align-self:start"><h3>Tus ritmos <span class="tag">VDOT ${nf1.format(pa.vdot)}</span></h3>
+        ${pa.race_from_goal && r.checklist && r.checklist.verdict && r.checklist.verdict.label === "ambicioso" ? `<p class="tag warn" style="white-space:normal;margin:0 0 6px">Tu ritmo objetivo es más rápido que lo que predice tu forma actual (${pace(r.prediction.estimate / (r.distance_m / 1000))} /km). Las sesiones a ritmo de carrera te dirán si es alcanzable.</p>` : ""}
+        <div class="rec-list">
+        ${paceRow("Suave y tirada larga", `${pace(pa.easy_fast)}–${pace(pa.easy_slow)}`, "Conversacional, la mayor parte del volumen")}
+        ${paceRow("Ritmo de carrera", pace(pa.race), pa.race_from_goal ? "Según tu tiempo objetivo" : "Según tu predicción")}
+        ${paceRow("Maratón", pace(pa.marathon), "Tiradas con tramos a ritmo")}
+        ${paceRow("Umbral", pace(pa.threshold), "«Cómodamente duro», 20–30 min")}
+        ${paceRow("Series", pace(pa.interval), "Tramos de 3–5 min")}
+        ${paceRow("Repeticiones", pace(pa.repetition), "Rectas y tramos cortos")}
+      </div><p class="faint" style="font-size:12px;margin:8px 0 0">Ritmos de Jack Daniels para tu VDOT, en min/km. Se recalculan al ajustar el plan.</p></div>
+      <div class="card wide" style="grid-column:1/-1"><h3>Kilómetros previstos y hechos por semana</h3><div class="chart" id="planChart" style="height:260px"></div></div>
+    </div>
+    <div class="section-title">Semanas</div>
+    ${P.weeks.map(weekHtml).join("")}`;
+  $("#redoPlan").onclick = () => { const c = $("#redoCard"); c.hidden = !c.hidden; };
+  $$(".pweek").forEach((d) => d.addEventListener("toggle", () => {
+    PLAN_OPEN[id] = new Set($$(".pweek[open]").map((x) => +x.dataset.week));
+  }));
+  setupPlanForm(r.id, () => rerender());
+  $("#delPlan").onclick = async () => {
+    if (!confirm("¿Eliminar el plan? Se perderá el seguimiento de las sesiones.")) return;
+    await api(`/api/races/${r.id}/plan`, { method: "DELETE" }); location.hash = `#/objetivo/${r.id}`;
+  };
+  $$(".psess").forEach((row) => {
+    const sid = row.dataset.id;
+    const sel = row.querySelector('[data-act="status"]');
+    if (sel) sel.onchange = async () => { try { await api(`/api/plan-sessions/${sid}`, { method: "PUT", body: { status: sel.value } }); rerender(); } catch (e) { toast(e.message, true); } };
+    const sm = row.querySelector('[data-act="showmove"]');
+    if (sm) sm.onclick = () => { const m = row.querySelector(".pmove"); m.hidden = !m.hidden; };
+    const mv = row.querySelector('[data-act="move"]');
+    if (mv) mv.onclick = async () => {
+      try { await api(`/api/plan-sessions/${sid}`, { method: "PUT", body: { date: row.querySelector(".pmove input").value } }); toast("Sesión movida"); rerender(); }
+      catch (e) { toast(e.message, true); }
+    };
+  });
+  const t = theme();
+  const phaseColor = { base: t.blue, build: t.accent, peak: t.violet, taper: t.good };
+  chart($("#planChart"), {
+    legend: { top: 0, textStyle: { color: t.text } }, grid: { top: 34, bottom: 30 },
+    xAxis: { type: "category", data: P.weeks.map((w) => `S${w.index}`) }, yAxis: { type: "value" },
+    tooltip: { formatter: (ps) => { const w = P.weeks[ps[0].dataIndex]; return `Semana ${w.index} · ${PHASES[w.phase]}<br>${fdateShort(w.monday)}<br>` + ps.filter((p) => p.value != null).map((p) => `${p.marker}${p.seriesName}: <b>${nf1.format(p.value)} km</b>`).join("<br>"); } },
+    series: [
+      { name: "Previsto", type: "bar", barGap: "-100%", itemStyle: { color: t.faint + "80" }, data: P.weeks.map((w) => ({ value: w.planned_km, itemStyle: { color: phaseColor[w.phase] + "40", borderRadius: [4, 4, 0, 0] } })) },
+      { name: "Hecho", type: "bar", data: P.weeks.map((w) => (w.past || w.current ? w.done_km : null)), barWidth: "45%", itemStyle: { color: t.accent, borderRadius: [4, 4, 0, 0] } },
+    ],
+  });
 });
 
 function projectionChart(el, r) {
