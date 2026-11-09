@@ -25,6 +25,8 @@ DEFAULT_SETTINGS = {
     "weekly_goal_km": 30,
     "monthly_goal_km": 120,
     "yearly_goal_km": 1200,
+    "theme": "auto",
+    "accent": "#ff6b2c",
     "widgets": [
         {"id": "week", "visible": True, "wide": False},
         {"id": "fitness", "visible": True, "wide": False},

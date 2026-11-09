@@ -97,6 +97,23 @@ function tsbLabel(tsb) {
   return ["Riesgo de sobrecarga", "bad"];
 }
 
+// ---------------------------------------------------------------- tema
+const ACCENTS = [["#ff6b2c", "Naranja"], ["#ef4444", "Rojo"], ["#ec4899", "Rosa"], ["#8b5cf6", "Violeta"],
+  ["#3b82f6", "Azul"], ["#14b8a6", "Turquesa"], ["#22c55e", "Verde"], ["#eab308", "Amarillo"]];
+const THEMES = [["auto", "Automático"], ["light", "Claro"], ["dark", "Oscuro"], ["black", "Negro"]];
+function applyTheme(theme, accent, save = true) {
+  const root = document.documentElement;
+  if (!theme || theme === "auto") delete root.dataset.theme; else root.dataset.theme = theme;
+  if (accent) root.style.setProperty("--accent", accent);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = css("--bg");
+  if (save) { try { localStorage.setItem("mg_theme", JSON.stringify({ theme, accent })); } catch { /* sin almacenamiento */ } }
+}
+// en modo automático, repintar gráficas si el sistema cambia entre claro y oscuro
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (!document.documentElement.dataset.theme && AUTHED) { applyTheme("auto", null, false); rerender(); }
+});
+
 // ---------------------------------------------------------------- gráficas
 let charts = [];
 let maps = [];
@@ -806,6 +823,16 @@ route("ajustes", async (view) => {
       <div class="card"><h3>Cuenta de Garmin ${st.connected ? `<span class="tag good">Conectada</span>` : `<span class="tag bad">Sin conectar</span>`}</h3>
         <div id="garminBox"></div>
       </div>
+      <div class="card"><h3>Apariencia</h3>
+        <label class="field">Tema</label>
+        <div class="seg" id="themeSeg" style="margin-top:6px">${THEMES.map(([k, l]) => `<button data-theme="${k}" class="${(set.theme || "auto") === k ? "on" : ""}">${l}</button>`).join("")}</div>
+        <div class="faint" style="font-size:12px;margin-top:6px">Automático sigue el modo claro u oscuro del dispositivo. Negro ahorra batería en pantallas OLED.</div>
+        <label class="field" style="margin-top:16px">Color principal</label>
+        <div class="swatches" id="accentSw">${ACCENTS.map(([c, l]) => `<button class="swatch ${(set.accent || "#ff6b2c").toLowerCase() === c ? "on" : ""}" data-accent="${c}" title="${l}" aria-label="${l}" style="background:${c}"></button>`).join("")}
+          <label class="swatch" title="Personalizado" style="background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);position:relative;overflow:hidden">
+            <input type="color" id="accentCustom" value="${esc(set.accent || "#ff6b2c")}" style="opacity:0;position:absolute;inset:0;width:100%;height:100%;cursor:pointer"></label>
+        </div>
+      </div>
       <div class="card"><h3>Tu cuenta ${ME && ME.is_admin ? `<span class="tag accent">Administrador</span>` : ""}</h3>
         <p>Has iniciado sesión como <b>${esc(ME ? ME.username : "")}</b>.</p>
         <div class="row"><button class="btn" id="logoutBtn">Cerrar sesión</button><button class="btn ghost" id="pwToggle">Cambiar contraseña</button></div>
@@ -866,6 +893,14 @@ route("ajustes", async (view) => {
     </div>`;
   garminBox($("#garminBox"), st);
   $("#logoutBtn").onclick = logout;
+  const saveAppearance = async (theme, accent) => {
+    applyTheme(theme, accent);
+    await api("/api/settings", { method: "PUT", body: { theme, accent } });
+    rerender();
+  };
+  $$("#themeSeg button").forEach((b) => (b.onclick = () => saveAppearance(b.dataset.theme, set.accent)));
+  $$("#accentSw [data-accent]").forEach((b) => (b.onclick = () => saveAppearance(set.theme, b.dataset.accent)));
+  $("#accentCustom").onchange = (e) => saveAppearance(set.theme, e.target.value);
   $("#pwToggle").onclick = () => { const f = $("#pwForm"); f.hidden = !f.hidden; if (!f.hidden) $("#pwCur").focus(); };
   $("#pwForm").onsubmit = async (e) => {
     e.preventDefault();
@@ -1008,9 +1043,10 @@ function showAuth(setup) {
   };
 }
 
-function enterApp() {
+async function enterApp() {
   AUTHED = true;
   document.body.classList.remove("auth-screen");
+  try { const st = await api("/api/settings"); applyTheme(st.theme, st.accent); } catch { /* usar el local */ }
   rerender();
 }
 

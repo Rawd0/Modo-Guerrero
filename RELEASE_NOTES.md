@@ -1,7 +1,5 @@
-Inicio de sesión propio: ya no se pide la contraseña de Umbrel.
+Personalización de la apariencia.
 
-- Al abrir la app por primera vez tras actualizar, crea tu cuenta (será la de administrador). Hazlo justo después de actualizar.
-- Opción «Recordar este dispositivo» durante 90 días: en el móvil no tendrás que volver a escribir la contraseña.
-- Contraseñas guardadas con scrypt, bloqueo de 15 minutos tras 5 intentos fallidos y protección CSRF.
-- Nueva tarjeta «Tu cuenta» en Ajustes: cambiar la contraseña, ver los dispositivos con sesión abierta y cerrarlos.
-- Base preparada para tener varios usuarios en el futuro.
+- Nueva tarjeta «Apariencia» en Ajustes: tema Automático (sigue al dispositivo), Claro, Oscuro o Negro (ideal para pantallas OLED).
+- Color principal a elegir entre 8 colores o uno personalizado. Se aplica a botones, gráficas, mapas y barras de progreso.
+- La elección se guarda en tu cuenta y se aplica en todos tus dispositivos, sin parpadeo al cargar.
