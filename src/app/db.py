@@ -15,7 +15,7 @@ from .config import DB_PATH, DEFAULT_SETTINGS
 
 log = logging.getLogger("guerrero.db")
 _lock = threading.RLock()
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -125,7 +125,8 @@ CREATE TABLE IF NOT EXISTS plan_sessions (
     distance_km REAL, target_pace REAL,
     status TEXT DEFAULT 'planned',
     activity_id INTEGER,
-    manual INTEGER DEFAULT 0
+    manual INTEGER DEFAULT 0,
+    execution TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_psess_plan ON plan_sessions(plan_id, date);
 CREATE INDEX IF NOT EXISTS ix_psess_user ON plan_sessions(user_id, date);
@@ -239,6 +240,9 @@ def _migrate(con):
         for col, typ in (("gap_pace", "REAL"), ("derived_v", "INTEGER DEFAULT 0"), ("shoe_id", "INTEGER")):
             if col not in have:
                 con.execute(f"ALTER TABLE activities ADD COLUMN {col} {typ}")
+    # v6: cómo se hizo cada sesión del plan (ritmo cumplido)
+    if _exists(con, "plan_sessions") and "execution" not in _cols(con, "plan_sessions"):
+        con.execute("ALTER TABLE plan_sessions ADD COLUMN execution TEXT")
     if _exists(con, "sync_log") and "user_id" not in _cols(con, "sync_log"):
         con.execute("ALTER TABLE sync_log ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")
     if _exists(con, "users") and "must_change" not in _cols(con, "users"):
@@ -350,6 +354,10 @@ def all_settings(user_id: int):
         if r["key"] in DEFAULT_SETTINGS:
             out[r["key"]] = json.loads(r["value"])
     # widgets: añadir al final los que hayan aparecido en versiones nuevas
+    for w in out["widgets"]:
+        # anchura en columnas de 12 (antes sólo había «ancho» o «estrecho»)
+        if w.get("cols") not in (3, 4, 6, 8, 12):
+            w["cols"] = 8 if w.get("wide") else 4
     known = {w["id"] for w in out["widgets"]}
     for w in DEFAULT_SETTINGS["widgets"]:
         if w["id"] not in known:

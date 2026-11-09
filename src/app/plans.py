@@ -15,7 +15,7 @@ import json
 import math
 from datetime import date, datetime, timedelta
 
-from . import db, races
+from . import db, execution, races
 
 DAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 TYPES = {
@@ -321,14 +321,15 @@ def match_sessions(uid: int, plan_id: int):
         acts = [a for a in db.rows("SELECT id, distance_m FROM activities WHERE user_id=? AND is_run=1 AND date=? "
                                    "ORDER BY distance_m DESC", (uid, s["date"])) if a["id"] not in used]
         if acts:
-            db.execute("UPDATE plan_sessions SET status='done', activity_id=? WHERE id=?", (acts[0]["id"], s["id"]))
+            db.execute("UPDATE plan_sessions SET status='done', activity_id=?, execution=NULL WHERE id=?", (acts[0]["id"], s["id"]))
         elif s["date"] < today:
             db.execute("UPDATE plan_sessions SET status='missed' WHERE id=?", (s["id"],))
     # la carrera: enlazada al resultado del objetivo
     race_s = db.one("SELECT ps.id, r.result_activity_id FROM plan_sessions ps JOIN training_plans tp ON tp.id=ps.plan_id "
                     "JOIN races r ON r.id=tp.race_id WHERE ps.plan_id=? AND ps.type='race'", (plan_id,))
     if race_s and race_s["result_activity_id"]:
-        db.execute("UPDATE plan_sessions SET status='done', activity_id=? WHERE id=?", (race_s["result_activity_id"], race_s["id"]))
+        db.execute("UPDATE plan_sessions SET status='done', execution=CASE WHEN activity_id=? THEN execution END, activity_id=? "
+                   "WHERE id=?", (race_s["result_activity_id"], race_s["result_activity_id"], race_s["id"]))
 
 
 def update_session(uid: int, session_id: int, payload: dict):
@@ -339,8 +340,15 @@ def update_session(uid: int, session_id: int, payload: dict):
     if status is not None:
         if status not in ("planned", "done", "skipped"):
             raise PlanError("Estado no válido")
-        db.execute("UPDATE plan_sessions SET status=?, activity_id=CASE WHEN ?='done' THEN activity_id ELSE NULL END, "
-                   "manual=1 WHERE id=?", (status, status, session_id))
+        act = s["activity_id"]
+        if status == "done" and not act:
+            # marcada a mano: enlazar la carrera de ese día, si la hay y no está ya en otra sesión
+            row = db.one("SELECT a.id FROM activities a WHERE a.user_id=? AND a.is_run=1 AND a.date=? AND NOT EXISTS "
+                         "(SELECT 1 FROM plan_sessions p WHERE p.activity_id=a.id) ORDER BY a.distance_m DESC",
+                         (uid, s["date"]))
+            act = row["id"] if row else None
+        db.execute("UPDATE plan_sessions SET status=?, activity_id=?, execution=NULL, manual=1 WHERE id=?",
+                   (status, act if status == "done" else None, session_id))
     if payload.get("date"):
         try:
             nd = date.fromisoformat(payload["date"])
@@ -353,7 +361,7 @@ def update_session(uid: int, session_id: int, payload: dict):
             raise PlanError("La carrera se mueve desde el objetivo, no desde el plan")
         if not first <= nd.isoformat() < bounds["race_date"]:
             raise PlanError("La sesión tiene que quedar entre el inicio del plan y la carrera")
-        db.execute("UPDATE plan_sessions SET date=?, status='planned', activity_id=NULL, manual=0 WHERE id=?",
+        db.execute("UPDATE plan_sessions SET date=?, status='planned', activity_id=NULL, execution=NULL, manual=0 WHERE id=?",
                    (nd.isoformat(), session_id))
 
 
@@ -366,6 +374,9 @@ def get_plan(uid: int, race_id: int):
     match_sessions(uid, p["id"])
     sessions = db.rows("SELECT ps.*, a.distance_m act_distance, a.moving_s act_time, a.name act_name FROM plan_sessions ps "
                        "LEFT JOIN activities a ON a.id=ps.activity_id WHERE ps.plan_id=? ORDER BY ps.date, ps.id", (p["id"],))
+    paces = json.loads(p["paces"])
+    for s in sessions:
+        s["execution"] = execution.evaluate_session(uid, s, paces)
     meta = json.loads(p["weeks"])
     weeks = []
     today = date.today()
@@ -385,12 +396,16 @@ def get_plan(uid: int, race_id: int):
     past = [w for w in weeks if w["past"] or w["current"]]
     counted = [s for s in sessions if s["date"] <= today.isoformat() and s["type"] != "race"]
     done = sum(1 for s in counted if s["status"] == "done")
+    quality = [s["execution"] for s in sessions if s["execution"] and s["execution"]["kind"] not in ("easy", "whole")]
+    easy = [s["execution"] for s in sessions if s["execution"] and s["execution"]["kind"] == "easy"]
     return {"plan": {"id": p["id"], "params": json.loads(p["params"]), "paces": json.loads(p["paces"]),
                      "created": p["created"], "updated": p["updated"]},
             "weeks": weeks,
             "summary": {"sessions_done": done, "sessions_due": len(counted),
                         "km_done": round(sum(w["done_km"] for w in past), 1),
-                        "km_planned": round(sum(w["due_km"] for w in past), 1)}}
+                        "km_planned": round(sum(w["due_km"] for w in past), 1),
+                        "quality_done": len(quality), "quality_on_pace": sum(1 for x in quality if x["verdict"] == "ok"),
+                        "easy_done": len(easy), "easy_too_fast": sum(1 for x in easy if x["verdict"] == "fast")}}
 
 
 def today_session(uid: int):

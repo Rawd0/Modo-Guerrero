@@ -268,7 +268,12 @@ const WIDGETS = {
   shoes: { title: "Zapatillas", render: wShoes },
   next_race: { title: "Próxima carrera", render: wNextRace },
   today_session: { title: "Hoy toca", render: wToday },
+  calendar: { title: "Calendario del mes", render: wCalendar },
+  sleep_perf: { title: "Sueño y rendimiento", render: wSleepPerf },
 };
+// anchuras posibles en columnas de 12
+const COLS = [3, 4, 6, 8, 12];
+const COLS_LABEL = { 3: "¼", 4: "⅓", 6: "½", 8: "⅔", 12: "Todo" };
 
 route("home", async (view) => {
   const [data, settings] = await Promise.all([api("/api/home"), api("/api/settings")]);
@@ -279,18 +284,18 @@ route("home", async (view) => {
       <div class="row"><button class="btn" id="editBtn">Personalizar inicio</button></div>
     </div>
     ${hasData ? "" : `<div class="card empty"><h2>Aún no hay datos</h2><p>Cuando conectes Garmin y termine la primera sincronización, aquí verás tu resumen. También puedes importar archivos .FIT desde Ajustes.</p><a class="btn primary" href="#/ajustes">Ir a Ajustes</a></div><br>`}
-    <div class="grid" id="widgets"></div>
+    <div class="home-grid" id="widgets"></div>
     <div class="hidden-tray" id="tray" hidden><b>Widgets ocultos</b><div class="row" id="trayList"></div></div>`;
   const grid = $("#widgets");
   const ws = settings.widgets;
   for (const w of ws) {
     if (!w.visible || !WIDGETS[w.id]) continue;
     const card = document.createElement("section");
-    card.className = "card" + (w.wide ? " wide" : "");
+    card.className = `card cols-${w.cols || (w.wide ? 8 : 4)}`;
     card.dataset.id = w.id;
     grid.appendChild(card);
     const after = WIDGETS[w.id].render(card, data);
-    card.insertAdjacentHTML("beforeend", `<div class="edit-bar"><button data-act="wide">${w.wide ? "Estrecho" : "Ancho"}</button><button data-act="hide">Ocultar</button></div>`);
+    card.insertAdjacentHTML("beforeend", `<div class="edit-bar"><button data-act="narrow" title="Más estrecho">−</button><span class="wlabel">${COLS_LABEL[w.cols || 4]}</span><button data-act="widen" title="Más ancho">+</button><button data-act="hide">Ocultar</button></div><div class="resize-handle" title="Arrastra para cambiar el ancho"></div>`);
     if (after) after();
   }
   setupEditing(ws);
@@ -327,7 +332,7 @@ function setupEditing(ws) {
     tray.hidden = !on;
     if (on) {
       renderTray();
-      sortable = Sortable.create(grid, { animation: 150, onEnd: save });
+      sortable = Sortable.create(grid, { animation: 150, onEnd: save, filter: ".resize-handle,.edit-bar", preventOnFilter: false });
     } else {
       sortable && sortable.destroy();
       await save();
@@ -339,9 +344,40 @@ function setupEditing(ws) {
     if (!b) return;
     const card = b.closest(".card"), w = ws.find((x) => x.id === card.dataset.id);
     if (b.dataset.act === "hide") { w.visible = false; card.remove(); renderTray(); }
-    if (b.dataset.act === "wide") { w.wide = !w.wide; card.classList.toggle("wide", w.wide); b.textContent = w.wide ? "Estrecho" : "Ancho"; charts.forEach((c) => c.resize()); }
+    if (b.dataset.act === "widen" || b.dataset.act === "narrow") {
+      const i = COLS.indexOf(w.cols || 4) + (b.dataset.act === "widen" ? 1 : -1);
+      setCols(card, w, COLS[Math.max(0, Math.min(COLS.length - 1, i))]);
+    }
     await save();
   });
+  // arrastrar el borde derecho para cambiar el ancho, ajustando a ¼, ⅓, ½, ⅔ o todo
+  grid.addEventListener("pointerdown", (e) => {
+    const h = e.target.closest(".resize-handle");
+    if (!h || !grid.classList.contains("editing")) return;
+    e.preventDefault(); e.stopPropagation();
+    const card = h.closest(".card"), w = ws.find((x) => x.id === card.dataset.id);
+    const left = card.getBoundingClientRect().left, colW = grid.getBoundingClientRect().width / 12;
+    sortable && sortable.option("disabled", true);
+    const move = (ev) => {
+      const want = (ev.clientX - left) / colW;
+      const best = COLS.reduce((a, c) => (Math.abs(c - want) < Math.abs(a - want) ? c : a), COLS[0]);
+      if (best !== w.cols) setCols(card, w, best, false);
+    };
+    const up = async () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      sortable && sortable.option("disabled", false);
+      charts.forEach((c) => c.resize());
+      await save();
+    };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  });
+  function setCols(card, w, cols, resize = true) {
+    w.cols = cols; w.wide = cols >= 8;
+    COLS.forEach((c) => card.classList.remove(`cols-${c}`));
+    card.classList.add(`cols-${cols}`);
+    const l = card.querySelector(".wlabel"); if (l) l.textContent = COLS_LABEL[cols];
+    if (resize) setTimeout(() => charts.forEach((c) => c.resize()), 50);
+  }
   tray.addEventListener("click", async (e) => {
     const b = e.target.closest("[data-show]");
     if (!b) return;
@@ -547,6 +583,67 @@ function wToday(card, d) {
       <p style="margin:8px 0 4px;font-size:14px">${esc(s.description)}</p>` : `<div class="muted">No quedan sesiones pendientes.</div>`}
     <div class="wkdots">${dots}</div>
     <a class="more" href="#/plan/${T.race_id}">Ver plan · ${esc(T.race_name)} →</a>`;
+}
+
+let calMonth = null;
+function wCalendar(card) {
+  const draw = async () => {
+    const C = await api(`/api/calendar${calMonth ? "?month=" + calMonth : ""}`);
+    const first = new Date(C.month + "-01T12:00:00");
+    const lead = (first.getDay() + 6) % 7, nDays = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    const max = Math.max(C.max_km, 10);
+    let cells = "";
+    for (let i = 0; i < lead; i++) cells += `<div class="cal-d empty"></div>`;
+    for (let dd = 1; dd <= nDays; dd++) {
+      const iso = `${C.month}-${String(dd).padStart(2, "0")}`, x = C.days[iso] || {};
+      const k = x.km || 0, alpha = k ? 0.25 + 0.75 * Math.min(1, k / max) : 0;
+      const plan = x.plan && iso >= C.today && !k ? `<i class="cal-plan ${x.plan.type}" title="${esc(SESSION_TYPES[x.plan.type]?.label || "")} ${x.plan.distance_km} km"></i>` : "";
+      const missed = x.plan && x.plan.status === "missed" ? " missed" : "";
+      const href = x.race ? `#/objetivo/${x.race.id}` : x.runs && x.runs.length === 1 ? `#/carrera/${x.runs[0].id}` : null;
+      const title = [x.race ? "🏁 " + x.race.name : "", ...(x.runs || []).map((r) => `${esc(r.name)} · ${nf1.format(r.km)} km`)].filter(Boolean).join("\n");
+      cells += `<${href ? `a href="${href}"` : "div"} class="cal-d${iso === C.today ? " today" : ""}${x.race ? " race" : ""}${missed}" title="${title}" style="${k ? `--a:${alpha}` : ""}">
+        <span class="n">${dd}</span>${k ? `<span class="km num">${nf1.format(k).replace(",0", "")}</span>` : plan}</${href ? "a" : "div"}>`;
+    }
+    const m = +C.month.slice(5, 7) - 1;
+    card.querySelector(".cal-body").innerHTML = `
+      <div class="row" style="justify-content:space-between;margin-bottom:8px"><button class="btn small ghost" data-cal="-1">‹</button>
+        <b>${MONTHS_FULL[m]} ${C.month.slice(0, 4)}</b><button class="btn small ghost" data-cal="1">›</button></div>
+      <div class="cal">${["L", "M", "X", "J", "V", "S", "D"].map((w) => `<div class="cal-h">${w}</div>`).join("")}${cells}</div>
+      <div class="muted" style="font-size:13px;margin-top:8px">${nf1.format(C.total_km)} km · ${C.runs} ${C.runs === 1 ? "carrera" : "carreras"}</div>`;
+    card.querySelectorAll("[data-cal]").forEach((b) => (b.onclick = () => {
+      const d = new Date(C.month + "-15T12:00:00"); d.setMonth(d.getMonth() + +b.dataset.cal);
+      calMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; draw();
+    }));
+  };
+  card.innerHTML = `<h3>Calendario</h3><div class="cal-body"><div class="muted">Cargando…</div></div>`;
+  draw();
+}
+
+function wSleepPerf(card, d) {
+  const S = d.sleep_perf || {};
+  if (!S.points || !S.points.length) {
+    card.innerHTML = `<h3>Sueño y rendimiento</h3><div class="muted">Hacen falta al menos 5 carreras con pulso de días en los que el reloj registró el sueño.</div>`;
+    return;
+  }
+  const strength = Math.abs(S.r) < 0.15 ? "apenas se nota" : Math.abs(S.r) < 0.35 ? "se nota algo" : "se nota bastante";
+  const diff = S.good_avg != null && S.bad_avg != null ? S.good_avg - S.bad_avg : null;
+  card.innerHTML = `<h3>Sueño y rendimiento <span class="tag">${S.n} carreras</span></h3>
+    <div class="chart" id="cSleepPerf" style="height:200px"></div>
+    <div class="muted" style="font-size:13px">${diff != null ? `Tras noches con sueño ≥ 80 corres con <b>${diff >= 0 ? "un " + nf1.format(diff) + " % más" : "un " + nf1.format(-diff) + " % menos"}</b> de eficiencia que tras noches por debajo de 60.` : ""}
+      Relación sueño–rendimiento: ${strength} (r = ${S.r.toString().replace(".", ",")}).</div>`;
+  return () => {
+    const t = theme(), xs = S.points.map((p) => p.sleep), x0 = Math.min(...xs), x1 = Math.max(...xs);
+    chart($("#cSleepPerf", card), {
+      grid: { top: 10, bottom: 34, left: 40 },
+      xAxis: { type: "value", name: "puntuación de sueño", nameLocation: "middle", nameGap: 24, min: (v) => Math.floor(v.min / 10) * 10, max: 100, nameTextStyle: { color: t.faint } },
+      yAxis: { type: "value", scale: true, axisLabel: { formatter: (v) => v } },
+      tooltip: { formatter: (p) => p.seriesIndex ? "" : `${fdate(S.points[p.dataIndex].date)}<br>Sueño ${p.value[0]} (${nf1.format(S.points[p.dataIndex].sleep_h)} h)<br>Eficiencia ${nf1.format(p.value[1])} (100 = tu media)` },
+      series: [
+        { type: "scatter", data: S.points.map((p) => [p.sleep, p.eff]), symbolSize: 7, itemStyle: { color: t.violet + "aa" } },
+        { type: "line", data: [[x0, S.intercept + S.slope * x0], [x1, S.intercept + S.slope * x1]], symbol: "none", lineStyle: { color: t.accent, width: 2, type: "dashed" }, tooltip: { show: false } },
+      ],
+    });
+  };
 }
 
 function wShoes(card, d) {
@@ -965,7 +1062,7 @@ route("stats", async (view) => {
   const P = S.periods.slice(statsGroup === "week" ? -52 : statsGroup === "month" ? -36 : -20);
   const label = (p) => statsGroup === "month" ? `${MONTHS[+p.slice(5, 7) - 1]} ${p.slice(2, 4)}` : statsGroup === "week" ? fdateShort(p) : p;
   view.innerHTML = `
-    <div class="page-head"><div><h1>Estadísticas</h1><div class="sub">Desde ${T.first ? fdate(T.first) : "–"}</div></div>
+    <div class="page-head"><div><h1>Estadísticas</h1><div class="sub">Desde ${T.first ? fdate(T.first) : "–"} · <a href="#/comparar">Comparar periodos →</a></div></div>
       <div class="seg" id="grp">${[["week", "Semanas"], ["month", "Meses"], ["year", "Años"]].map(([k, l]) => `<button data-g="${k}" class="${k === statsGroup ? "on" : ""}">${l}</button>`).join("")}</div></div>
     <div class="grid">
       <div class="card"><h3>Total</h3><div class="big num">${km(T.dist)}<small>km</small></div><div class="muted">${int(T.n)} carreras · ${hours(T.secs)} · ${int(T.elev)} m+</div></div>
@@ -1016,6 +1113,102 @@ route("stats", async (view) => {
     xAxis: { type: "category", data: order }, yAxis: { type: "value" },
     tooltip: { formatter: (ps) => `${ps[0].axisValue}: <b>${ps[0].value}</b> carreras` },
     series: [{ type: "bar", data: order.map((k) => hist[k] || 0), itemStyle: { color: t.violet + "cc", borderRadius: [4, 4, 0, 0] } }],
+  });
+});
+
+// ================================================================ COMPARAR PERIODOS
+let CMP = null; // { a: [desde, hasta], b: [desde, hasta], key }
+route("comparar", async (view) => {
+  const presets = await api("/api/compare/presets");
+  if (!CMP) CMP = { key: presets[0].key, a: presets[0].a, b: presets[0].b };
+  const C = await api(`/api/compare?a_from=${CMP.a[0]}&a_to=${CMP.a[1]}&b_from=${CMP.b[0]}&b_to=${CMP.b[1]}`);
+  const A = C.a, B = C.b, t = theme();
+  const rng = (p) => `${fdateShort(p.from)} ${p.from.slice(2, 4)}<br>${fdateShort(p.to)} ${p.to.slice(2, 4)}`;
+  // diferencia de A respecto a B; `lower` = menos es mejor (ritmo, FC, pulso en reposo…)
+  const diff = (a, b, fmt, lower = false, neutral = false) => {
+    if (a == null || b == null || b === 0) return `<span class="faint">–</span>`;
+    const d = a - b, pct = (d / Math.abs(b)) * 100;
+    if (Math.abs(pct) < 1) return `<span class="delta flat">=</span>`;
+    const good = lower ? d < 0 : d > 0;
+    return `<span class="delta ${neutral ? "flat" : good ? "up" : "down"}">${d > 0 ? "+" : "−"}${fmt(Math.abs(d))}</span>`;
+  };
+  const kmf = (v) => nf1.format(v), i0 = (v) => nf0.format(v), pf = (v) => pace(v);
+  const rows = [
+    ["Carreras", A.runs, B.runs, i0, i0],
+    ["Kilómetros", A.km, B.km, kmf, kmf],
+    ["Km por semana", A.km_week, B.km_week, kmf, kmf],
+    ["Carreras por semana", A.runs_week, B.runs_week, kmf, kmf],
+    ["Tiempo", A.secs, B.secs, (v) => hours(v), (v) => hours(v)],
+    ["Desnivel (m+)", A.elev, B.elev, i0, i0],
+    ["Tirada más larga (km)", A.longest_km, B.longest_km, kmf, kmf],
+    ["Ritmo medio (/km)", A.pace, B.pace, pf, pf, true],
+    ["Ritmo ajustado a pendiente (/km)", A.gap, B.gap, pf, pf, true],
+    ["FC media", A.avg_hr, B.avg_hr, i0, i0, true, true],
+    ["Eficiencia (m/min por pulsación)", A.efficiency, B.efficiency, (v) => v.toFixed(2).replace(".", ","), (v) => v.toFixed(2).replace(".", ",")],
+    ["VDOT (mejor del periodo)", A.vdot, B.vdot, kmf, kmf],
+    ["Fitness (CTL) al final", A.ctl_end, B.ctl_end, i0, i0],
+    ["Sueño (puntuación media)", A.sleep_score, B.sleep_score, i0, i0],
+    ["Horas de sueño", A.sleep_h, B.sleep_h, kmf, kmf],
+    ["VFC nocturna (ms)", A.hrv, B.hrv, i0, i0],
+    ["FC en reposo", A.rhr, B.rhr, kmf, kmf, true],
+    ["Estrés medio", A.stress, B.stress, i0, i0, true],
+  ];
+  const cell = (v, f) => (v == null ? `<span class="faint">–</span>` : f(v));
+  view.innerHTML = `
+    <div class="page-head"><div><a class="muted" href="#/stats">← Estadísticas</a><h1>Comparar periodos</h1><div class="sub">Dos periodos lado a lado: volumen, ritmo, forma, marcas y salud</div></div></div>
+    <div class="card" style="margin-bottom:16px">
+      <label class="field">Comparación<select id="cmpPreset">${presets.map((p) => `<option value="${esc(p.key)}" ${p.key === CMP.key ? "selected" : ""}>${esc(p.label)}</option>`).join("")}<option value="custom" ${CMP.key === "custom" ? "selected" : ""}>Personalizada…</option></select></label>
+      <div class="cmp-form" style="margin-top:12px">
+        <div class="cmp-range"><span class="cmp-tag a">A</span><label class="field">Desde<input type="date" id="aFrom" value="${CMP.a[0]}"></label><label class="field">Hasta<input type="date" id="aTo" value="${CMP.a[1]}"></label></div>
+        <div class="cmp-range"><span class="cmp-tag b">B</span><label class="field">Desde<input type="date" id="bFrom" value="${CMP.b[0]}"></label><label class="field">Hasta<input type="date" id="bTo" value="${CMP.b[1]}"></label></div>
+        <div class="row" style="align-self:end"><button class="btn primary" id="cmpGo">Comparar</button></div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card wide" style="grid-column:1/-1"><h3>Resumen</h3>
+        <div class="table-wrap" style="border:0"><table class="cmp-table">
+          <thead><tr><th class="l"></th><th><span class="cmp-tag a">A</span><br><span class="faint" style="font-weight:400;text-transform:none">${rng(A)}</span></th><th><span class="cmp-tag b">B</span><br><span class="faint" style="font-weight:400;text-transform:none">${rng(B)}</span></th><th>Dif.</th></tr></thead>
+          <tbody>${rows.map(([l, a, b, fa, fd, lower, neutral]) => `<tr><td class="l">${l}</td><td class="num">${cell(a, fa)}</td><td class="num">${cell(b, fa)}</td><td class="num">${diff(a, b, fd, lower, neutral)}</td></tr>`).join("")}</tbody>
+        </table></div>
+        <p class="faint" style="font-size:12px;margin:8px 0 0">Verde: mejor en A. En ritmo, FC en reposo y estrés, menos es mejor. La FC media no se valora porque depende de lo que hayas entrenado.</p></div>
+      <div class="card wide" style="grid-column:1/-1"><h3>Kilómetros acumulados día a día</h3><div class="chart" id="cmpCum" style="height:280px"></div></div>
+      <div class="card wide" style="grid-column:1/-1"><h3>Kilómetros por semana</h3><div class="chart" id="cmpWeeks" style="height:240px"></div></div>
+      <div class="card"><h3>Mejores marcas en cada periodo</h3><div class="rec-list">
+        ${A.best.map((x, i) => { const y = B.best[i]; if (!x.time_s && !y.time_s) return ""; const better = x.time_s && y.time_s ? (x.time_s < y.time_s ? "a" : "b") : null;
+          return `<div class="rec-row" style="grid-template-columns:1fr auto auto"><span>${x.label}</span><span class="num ${better === "a" ? "cmp-win" : ""}" style="color:var(--accent)">${x.time_s ? dur(x.time_s) : "–"}</span><span class="num ${better === "b" ? "cmp-win" : ""}" style="color:var(--blue)">${y.time_s ? dur(y.time_s) : "–"}</span></div>`; }).join("")}
+      </div><p class="faint" style="font-size:12px;margin:8px 0 0">El mejor tramo de cada distancia dentro de cada periodo (también dentro de carreras más largas).</p></div>
+    </div>`;
+  const preset = $("#cmpPreset");
+  preset.onchange = () => {
+    const p = presets.find((x) => x.key === preset.value);
+    if (p) { CMP = { key: p.key, a: p.a, b: p.b }; rerender(); }
+  };
+  ["#aFrom", "#aTo", "#bFrom", "#bTo"].forEach((sel) => ($(sel).oninput = () => (preset.value = "custom")));
+  $("#cmpGo").onclick = () => {
+    const v = (sel) => $(sel).value;
+    if (![v("#aFrom"), v("#aTo"), v("#bFrom"), v("#bTo")].every(Boolean)) { toast("Completa las cuatro fechas", true); return; }
+    CMP = { key: "custom", a: [v("#aFrom"), v("#aTo")], b: [v("#bFrom"), v("#bTo")] }; rerender();
+  };
+  const n = Math.max(A.cum_km.length, B.cum_km.length);
+  chart($("#cmpCum"), {
+    legend: { top: 0, textStyle: { color: t.text } }, grid: { top: 34, bottom: 30 },
+    xAxis: { type: "category", data: Array.from({ length: n }, (_, i) => i + 1), name: "día", nameLocation: "end", nameTextStyle: { color: t.faint } },
+    yAxis: { type: "value" },
+    tooltip: { formatter: (ps) => `Día ${ps[0].axisValue}<br>` + ps.map((p) => `${p.marker}${p.seriesName}: <b>${nf1.format(p.value)} km</b>`).join("<br>") },
+    series: [
+      { name: "A", type: "line", data: A.cum_km, symbol: "none", lineStyle: { color: t.accent, width: 2.5 }, itemStyle: { color: t.accent }, areaStyle: { color: t.accent + "14" } },
+      { name: "B", type: "line", data: B.cum_km, symbol: "none", lineStyle: { color: t.blue, width: 2.5 }, itemStyle: { color: t.blue } },
+    ],
+  });
+  const nw = Math.max(A.weeks_km.length, B.weeks_km.length);
+  chart($("#cmpWeeks"), {
+    legend: { top: 0, textStyle: { color: t.text } }, grid: { top: 34, bottom: 30 },
+    xAxis: { type: "category", data: Array.from({ length: nw }, (_, i) => `S${i + 1}`) }, yAxis: { type: "value" },
+    tooltip: { formatter: (ps) => `Semana ${ps[0].dataIndex + 1}<br>` + ps.map((p) => `${p.marker}${p.seriesName}: <b>${nf1.format(p.value ?? 0)} km</b>`).join("<br>") },
+    series: [
+      { name: "A", type: "bar", data: A.weeks_km, itemStyle: { color: t.accent, borderRadius: [3, 3, 0, 0] } },
+      { name: "B", type: "bar", data: B.weeks_km, itemStyle: { color: t.blue, borderRadius: [3, 3, 0, 0] } },
+    ],
   });
 });
 
@@ -1154,6 +1347,16 @@ const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const PLAN_OPEN = {}; // semanas desplegadas por plan, para no plegarlas al actualizar
 const PSTATUS = { planned: "Pendiente", done: "Hecha", skipped: "Saltada", missed: "No hecha" };
 const typeTag = (t) => `<span class="tag ${(SESSION_TYPES[t] || {}).cls || ""}">${(SESSION_TYPES[t] || { label: t }).label}</span>`;
+// cómo se hizo la sesión: ritmo real frente al previsto
+function execHtml(x) {
+  if (!x) return "";
+  const cls = { ok: "good", fast: "warn", slow: "warn", veryslow: "bad" }[x.verdict] || "";
+  const target = x.target_range ? `${pace(x.target_range[0])}–${pace(x.target_range[1])}` : x.target_pace ? pace(x.target_pace) : null;
+  const reps = x.reps && x.reps.length > 1 ? `<div class="faint" style="font-size:12px;margin-top:3px">Repeticiones: ${x.reps.map((r) => `<span class="num">${pace(r)}</span>`).join(" · ")}${x.spread > 6 ? ` <span class="tag warn" style="font-size:10px;padding:1px 5px">irregular</span>` : ""}</div>` : "";
+  return `<div class="pexec"><span class="tag ${cls}">${esc(x.label)}</span>
+    <span class="num" style="font-size:13px">${x.detail ? esc(x.detail) + ": " : "Media: "}<b>${pace(x.actual_pace)}</b>${target ? ` <span class="faint">/ previsto ${target}</span>` : ""} /km</span>
+    ${x.distance_ok ? "" : `<span class="tag warn">Más corta (${nf1.format(x.distance_km)} km)</span>`}${reps}</div>`;
+}
 function isoToday() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 
 function planFormHtml(params, dflt) {
@@ -1211,6 +1414,7 @@ route("plan", async (view, id) => {
         <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">${typeTag(s.type)}<b class="num">${s.type === "race" ? raceDist(r) : nf1.format(s.distance_km).replace(",0", "") + " km"}</b>
           ${act ? `<a class="faint" style="font-size:12px" href="#/carrera/${s.activity_id}">✓ ${km(s.act_distance)} km a ${pace(s.act_time / (s.act_distance / 1000))} /km</a>` : ""}</div>
         <div class="pdesc">${esc(s.description)}</div>
+        ${execHtml(s.execution)}
         <div class="pmove" hidden><input type="date" value="${s.date}"> <button class="btn small" data-act="move">Mover</button></div>
       </div>
       ${s.type === "race" ? `<span class="tag ${done ? "good" : ""}">${done ? "Hecha" : "🏁"}</span>` : `<div class="pact">
@@ -1243,8 +1447,10 @@ route("plan", async (view, id) => {
           <div class="kpi"><div class="v num">${S.sessions_done}/${S.sessions_due}</div><div class="l">Sesiones hechas</div></div>
           <div class="kpi"><div class="v num">${nf0.format(S.km_done)}<small style="font-size:12px"> / ${nf0.format(S.km_planned)}</small></div><div class="l">Km hasta hoy</div></div>
           <div class="kpi"><div class="v num">${S.km_planned ? Math.round((100 * S.km_done) / S.km_planned) + "%" : "–"}</div><div class="l">Del volumen previsto</div></div>
+          <div class="kpi"><div class="v num">${S.quality_done ? `${S.quality_on_pace}/${S.quality_done}` : "–"}</div><div class="l">Sesiones de calidad en ritmo</div></div>
+          <div class="kpi"><div class="v num">${S.easy_done ? S.easy_too_fast : "–"}</div><div class="l">Rodajes demasiado rápidos</div></div>
         </div>
-        <p class="faint" style="font-size:12px;margin:10px 0 0">Una sesión se da por hecha si ese día hay una carrera tuya. Puedes cambiar el estado o moverla de día.</p></div>
+        <p class="faint" style="font-size:12px;margin:10px 0 0">Una sesión se da por hecha si ese día hay una carrera tuya. Las series y tramos se buscan solos en el registro (no hace falta pulsar vuelta) y se comparan con el ritmo previsto: ±3 % es «en ritmo». Los rodajes suaves deben ir suaves de verdad.</p></div>
       <div class="card" style="align-self:start"><h3>Tus ritmos <span class="tag">VDOT ${nf1.format(pa.vdot)}</span></h3>
         ${pa.race_from_goal && r.checklist && r.checklist.verdict && r.checklist.verdict.label === "ambicioso" ? `<p class="tag warn" style="white-space:normal;margin:0 0 6px">Tu ritmo objetivo es más rápido que lo que predice tu forma actual (${pace(r.prediction.estimate / (r.distance_m / 1000))} /km). Las sesiones a ritmo de carrera te dirán si es alcanzable.</p>` : ""}
         <div class="rec-list">
@@ -1400,7 +1606,7 @@ route("zapatillas", async (view) => {
 route("ajustes", async (view) => {
   const [st, set, log, sessions, users] = await Promise.all([api("/api/status"), api("/api/settings"), api("/api/sync/log"),
     api("/api/account/sessions"), ME && ME.is_admin ? api("/api/admin/users") : Promise.resolve(null)]);
-  const bk = ME && ME.is_admin ? await api("/api/admin/backups") : null;
+  const [bk, rm] = ME && ME.is_admin ? await Promise.all([api("/api/admin/backups"), api("/api/admin/remote")]) : [null, null];
   view.innerHTML = `
     <div class="page-head"><div><h1>Ajustes</h1><div class="sub">Modo Guerrero v${esc(st.version)}</div></div></div>
     <div class="grid">
@@ -1508,6 +1714,7 @@ route("ajustes", async (view) => {
         <div id="nuMsg" style="margin-top:8px"></div>
       </div>` : ""}
       ${bk ? backupCard(bk) : ""}
+      ${rm ? remoteCard(rm) : ""}
       <div class="card wide" style="grid-column:1/-1"><h3>Historial de sincronizaciones</h3>
         <div class="table-wrap log" style="border:0"><table><thead><tr><th class="l">Inicio</th><th class="l">Estado</th><th class="l">Resultado</th></tr></thead>
         <tbody>${log.map((l) => `<tr><td class="l num">${esc((l.started || "").replace("T", " "))}</td><td class="l">${{ ok: '<span class="tag good">Correcta</span>', running: '<span class="tag accent">En curso</span>', auth: '<span class="tag bad">Sesión</span>', rate: '<span class="tag warn">Límite</span>' }[l.status] || '<span class="tag bad">Error</span>'}</td><td class="l">${esc(l.message || "")}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Todavía no ha habido sincronizaciones.</td></tr>`}</tbody></table></div>
@@ -1517,6 +1724,7 @@ route("ajustes", async (view) => {
   $("#logoutBtn").onclick = logout;
   if (users) setupUserAdmin();
   if (bk) setupBackups(bk);
+  if (rm) setupRemote(rm);
   const saveAppearance = async (theme, accent) => {
     applyTheme(theme, accent);
     await api("/api/settings", { method: "PUT", body: { theme, accent } });
@@ -1594,7 +1802,7 @@ function backupCard(bk) {
           <button class="btn small ghost" data-bkrestore="${esc(b.name)}">Restaurar</button>
           <button class="btn small ghost" data-bkdel="${esc(b.name)}" style="color:var(--bad)">Borrar</button></td></tr>`).join("")}</tbody></table></div>` : ""}
     <p class="faint" style="font-size:12px;margin:10px 0 0">Las copias incluyen los datos de todos los usuarios y se guardan en la carpeta de datos de la app, en este mismo disco.
-      Para protegerte de un fallo del disco, descarga de vez en cuando una copia a otro sitio. La clave que cifra las conexiones con Garmin no va dentro de la copia:
+      Para protegerte de un fallo del disco, configura abajo una copia fuera del servidor. La clave que cifra las conexiones con Garmin no va dentro de la copia:
       si restauras en otro servidor, cada usuario tendrá que volver a conectar Garmin.</p>
   </div>`;
 }
@@ -1640,6 +1848,118 @@ function setupBackups(bk) {
     try { await api(`/api/admin/backups/${encodeURIComponent(b.dataset.bkdel)}`, { method: "DELETE" }); rerender(); }
     catch (e) { toast(e.message, true); }
   }));
+}
+
+// ---- copia fuera del servidor
+function remoteCard(rm) {
+  const w = rm.webdav, g = rm.gdrive, last = rm.last;
+  const lastHtml = !last ? "" : last.ok
+    ? `<p class="tag good" style="white-space:normal">Última subida ${esc(timeAgo(last.at))}: ${esc(last.name)} → ${esc(last.where)} (${last.remote_count} ${last.remote_count === 1 ? "copia" : "copias"} en el destino)</p>`
+    : `<p class="tag bad" style="white-space:normal">La última subida falló ${esc(timeAgo(last.at))}: ${esc(last.error)}</p>`;
+  const origin = location.origin;
+  return `<div class="card wide" style="grid-column:1/-1" id="rmCard"><h3>Copia fuera del servidor ${rm.provider === "none" ? `<span class="tag warn">Sin configurar</span>` : `<span class="tag good">${rm.provider === "webdav" ? "Nextcloud / WebDAV" : "Google Drive"}</span>`}</h3>
+    <p class="muted" style="font-size:13px;margin-top:0">Cada copia que se crea (la automática diaria y, si quieres, las manuales) se sube también a otro sitio. Así, si falla el disco del servidor, no lo pierdes todo.</p>
+    ${lastHtml}
+    <div class="seg" id="rmProv" style="margin:6px 0 14px">${[["none", "Ninguno"], ["webdav", "Nextcloud / WebDAV"], ["gdrive", "Google Drive"]].map(([k, l]) => `<button data-p="${k}" class="${rm.provider === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    <div data-pane="webdav" ${rm.provider === "webdav" ? "" : "hidden"}>
+      <div class="form-grid">
+        <label class="field" style="grid-column:1/-1">Dirección WebDAV<input type="url" id="rmUrl" value="${esc(w.url)}" placeholder="http://192.168.1.10:8081/remote.php/dav/files/tu-usuario/"></label>
+        <label class="field">Usuario<input type="text" id="rmUser" value="${esc(w.user)}" autocomplete="off"></label>
+        <label class="field">Contraseña de aplicación<input type="password" id="rmPass" placeholder="${w.has_password ? "•••••••• (guardada)" : ""}" autocomplete="new-password"></label>
+        <label class="field">Carpeta<input type="text" id="rmFolder" value="${esc(w.folder)}"></label>
+      </div>
+      <details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:13px">Cómo configurarlo con Nextcloud</summary>
+        <ol class="muted" style="font-size:13px;line-height:1.6">
+          <li>En Nextcloud, abre <b>Archivos › Ajustes de archivos</b> (abajo a la izquierda) y copia la dirección <b>WebDAV</b>. Si usas el Nextcloud de Umbrel, cambia <i>umbrel.local</i> por la IP del servidor (por ejemplo <i>http://192.168.1.10:8081/…</i>): desde dentro de la app no se resuelve el nombre <i>.local</i>.</li>
+          <li>En <b>Ajustes personales › Seguridad</b>, crea una <b>contraseña de aplicación</b> llamada «Modo Guerrero» y pégala aquí. No uses tu contraseña normal: la de aplicación se puede revocar sin afectar a nada más.</li>
+          <li>Guarda y pulsa <b>Probar conexión</b>. La carpeta se crea sola. Funciona igual con cualquier servidor WebDAV (ownCloud, un NAS…).</li>
+        </ol></details>
+    </div>
+    <div data-pane="gdrive" ${rm.provider === "gdrive" ? "" : "hidden"}>
+      ${g.connected ? `<p style="font-size:14px">Conectado ${g.account ? `como <b>${esc(g.account)}</b>` : ""}. Las copias van a la carpeta <b>Modo Guerrero</b> de tu Drive.
+          <button class="btn small ghost" id="rmGdOff" style="color:var(--bad)">Desconectar</button></p>`
+        : `<div class="form-grid">
+          <label class="field" style="grid-column:1/-1">ID de cliente<input type="text" id="rmGdId" value="${esc(g.client_id)}" placeholder="123…apps.googleusercontent.com" autocomplete="off"></label>
+          <label class="field" style="grid-column:1/-1">Secreto de cliente<input type="password" id="rmGdSecret" placeholder="${g.has_secret ? "•••••••• (guardado)" : ""}" autocomplete="new-password"></label>
+        </div>
+        <div id="rmGdCode"></div>
+        <details style="margin-top:10px" ${g.client_id ? "" : "open"}><summary class="muted" style="cursor:pointer;font-size:13px">Cómo crear tu aplicación de Google (una sola vez, unos 5 minutos)</summary>
+          <ol class="muted" style="font-size:13px;line-height:1.6">
+            <li>Entra en <b>console.cloud.google.com</b> con tu cuenta y crea un proyecto llamado «Modo Guerrero».</li>
+            <li>En <b>APIs y servicios › Biblioteca</b>, busca <b>Google Drive API</b> y pulsa <b>Habilitar</b>.</li>
+            <li>En <b>Pantalla de consentimiento de OAuth</b> (o «Google Auth Platform»): tipo <b>Externo</b>, pon un nombre y tu correo. En <b>Público</b>, pulsa <b>Publicar la aplicación</b> («En producción»): si se queda «En pruebas», Google retira el permiso a los 7 días. No necesita verificación porque sólo pide acceso a los archivos que crea la propia app.</li>
+            <li>En <b>Credenciales › Crear credenciales › ID de cliente de OAuth</b>, elige el tipo <b>TV y dispositivos de entrada limitada</b>. Copia el <b>ID de cliente</b> y el <b>secreto</b> aquí y pulsa <b>Guardar</b>.</li>
+            <li>Pulsa <b>Autorizar Google Drive</b>: te dará un código para introducir en <b>google.com/device</b> desde el móvil o el ordenador. Google te avisará de que la app no está verificada: es la tuya, pulsa «Continuar».</li>
+          </ol>
+          <p class="faint" style="font-size:12px">La app sólo puede ver y borrar las copias que ella misma sube, nada más de tu Drive.</p></details>`}
+    </div>
+    <div class="form-grid" data-pane="any" style="margin-top:12px" ${rm.provider === "none" ? "hidden" : ""}>
+      <label class="field">Copias a conservar en el destino<input type="number" id="rmKeep" min="1" max="365" value="${rm.keep}"></label>
+      <label class="check" style="align-self:end;padding-bottom:10px"><input type="checkbox" id="rmManual" ${rm.upload_manual ? "checked" : ""}> Subir también las copias manuales</label>
+    </div>
+    <div class="row" style="margin-top:12px;flex-wrap:wrap">
+      <button class="btn" id="rmSave">Guardar</button>
+      <button class="btn" id="rmTest" ${rm.provider === "none" ? "hidden" : ""}>Probar conexión</button>
+      <button class="btn primary" id="rmGdAuth" ${rm.provider === "gdrive" && !g.connected ? "" : "hidden"}>Autorizar Google Drive</button>
+      <button class="btn" id="rmUp" ${rm.provider === "none" || (rm.provider === "gdrive" && !g.connected) ? "hidden" : ""}>Subir la última copia ahora</button>
+    </div>
+    <div id="rmMsg" style="margin-top:8px"></div>
+    <p class="faint" style="font-size:12px;margin:10px 0 0">Las copias contienen tus datos de entrenamiento y salud (no las contraseñas de Garmin). La contraseña y los permisos se guardan cifrados en el servidor.</p>
+  </div>`;
+}
+
+function setupRemote(rm) {
+  let provider = rm.provider;
+  const msg = (h) => ($("#rmMsg").innerHTML = h);
+  const showPanes = () => {
+    $$("#rmCard [data-pane]").forEach((p) => (p.hidden = p.dataset.pane === "any" ? provider === "none" : p.dataset.pane !== provider));
+    $("#rmTest").hidden = provider === "none";
+  };
+  $$("#rmProv button").forEach((b) => (b.onclick = () => {
+    provider = b.dataset.p; $$("#rmProv button").forEach((x) => x.classList.toggle("on", x === b)); showPanes();
+    $("#rmGdAuth").hidden = !(provider === "gdrive" && !rm.gdrive.connected);
+    $("#rmUp").hidden = true;
+  }));
+  const body = () => {
+    const b = { provider, keep: +($("#rmKeep").value || 14), upload_manual: $("#rmManual").checked };
+    if ($("#rmUrl")) b.webdav = { url: $("#rmUrl").value, user: $("#rmUser").value, folder: $("#rmFolder").value, password: $("#rmPass").value || null };
+    if ($("#rmGdId")) b.gdrive = { client_id: $("#rmGdId").value, client_secret: $("#rmGdSecret").value || null };
+    return b;
+  };
+  const save = async () => { await api("/api/admin/remote", { method: "PUT", body: body() }); };
+  $("#rmSave").onclick = async () => { try { await save(); toast("Guardado"); rerender(); } catch (e) { msg(`<p class="tag bad" style="white-space:normal">${esc(e.message)}</p>`); } };
+  $("#rmTest").onclick = async () => {
+    msg(`<p class="muted">Probando…</p>`);
+    try { await save(); const r = await api("/api/admin/remote/test", { method: "POST" }); msg(`<p class="tag good" style="white-space:normal">Conexión correcta: ${esc(r.where)} (${r.count} ${r.count === 1 ? "copia" : "copias"} ya subidas)</p>`); }
+    catch (e) { msg(`<p class="tag bad" style="white-space:normal">${esc(e.message)}</p>`); }
+  };
+  $("#rmUp").onclick = async () => {
+    const b = $("#rmUp"); b.disabled = true; msg(`<p class="muted">Subiendo…</p>`);
+    try { await api("/api/admin/remote/upload", { method: "POST" }); toast("Copia subida"); rerender(); }
+    catch (e) { msg(`<p class="tag bad" style="white-space:normal">${esc(e.message)}</p>`); b.disabled = false; }
+  };
+  const off = $("#rmGdOff");
+  if (off) off.onclick = async () => { if (!confirm("¿Desconectar Google Drive? Las copias ya subidas se quedan en tu Drive.")) return; await api("/api/admin/remote/gdrive", { method: "DELETE" }); rerender(); };
+  $("#rmGdAuth").onclick = async () => {
+    try {
+      await save();
+      const c = await api("/api/admin/remote/gdrive/start", { method: "POST" });
+      $("#rmGdCode").innerHTML = `<div class="card" style="background:var(--card-2);margin-top:12px;text-align:center">
+        <div class="muted" style="font-size:13px">Abre <a href="${esc(c.url)}" target="_blank" rel="noopener"><b>${esc(c.url.replace(/^https?:\/\//, ""))}</b></a> e introduce este código:</div>
+        <div class="big num" style="letter-spacing:.12em;margin:8px 0;user-select:all">${esc(c.user_code)}</div>
+        <div class="faint" style="font-size:12px" id="rmGdWait">Esperando a que lo autorices…</div></div>`;
+      const poll = async () => {
+        if (!document.body.contains($("#rmGdCode"))) return;
+        try {
+          const r = await api("/api/admin/remote/gdrive/poll", { method: "POST" });
+          if (r.status === "pending") return setTimeout(poll, (c.interval || 5) * 1000);
+          if (r.status === "ok") { toast("Google Drive conectado"); rerender(); return; }
+          $("#rmGdWait").innerHTML = `<span class="tag bad">${r.status === "denied" ? "Has rechazado el permiso" : r.status === "expired" ? "El código ha caducado; vuelve a pulsar Autorizar" : "No se pudo autorizar (" + esc(r.error || "error") + ")"}</span>`;
+        } catch (e) { $("#rmGdWait").innerHTML = `<span class="tag bad">${esc(e.message)}</span>`; }
+      };
+      setTimeout(poll, (c.interval || 5) * 1000);
+    } catch (e) { msg(`<p class="tag bad" style="white-space:normal">${esc(e.message)}</p>`); }
+  };
 }
 
 function tempPassword() {

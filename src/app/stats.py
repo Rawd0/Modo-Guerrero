@@ -128,6 +128,7 @@ def home(uid: int):
         "monotony": metrics.monotony_strain(uid, weeks=8),
         "next_race": races_mod.next_race(uid),
         "today_session": plans_mod.today_session(uid),
+        "sleep_perf": sleep_performance(uid),
     }
 
 
@@ -223,3 +224,66 @@ def pace_curve(uid: int, recent_days=90):
 
     return {"all": best(), "recent": best("AND a.date>=?", (since,)), "year": best("AND a.date>=?", (year0,)),
             "recent_days": recent_days}
+
+
+# ---------- calendario del mes ----------
+def calendar(uid: int, month: str = ""):
+    today = date.today()
+    first = date.fromisoformat(month + "-01") if month else today.replace(day=1)
+    nxt = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
+    s, e = first.isoformat(), (nxt - timedelta(days=1)).isoformat()
+    runs = db.rows("SELECT id, date, distance_m, name FROM activities WHERE user_id=? AND is_run=1 AND date BETWEEN ? AND ? "
+                   "ORDER BY start_local", (uid, s, e))
+    plan = db.rows("SELECT ps.date, ps.type, ps.distance_km, ps.status, tp.race_id FROM plan_sessions ps "
+                   "JOIN training_plans tp ON tp.id=ps.plan_id WHERE ps.user_id=? AND ps.date BETWEEN ? AND ?", (uid, s, e))
+    race_days = db.rows("SELECT id, name, date FROM races WHERE user_id=? AND date BETWEEN ? AND ?", (uid, s, e))
+    days = {}
+    for r in runs:
+        d = days.setdefault(r["date"], {"km": 0, "runs": []})
+        d["km"] += (r["distance_m"] or 0) / 1000
+        d["runs"].append({"id": r["id"], "km": round((r["distance_m"] or 0) / 1000, 1), "name": r["name"]})
+    for p in plan:
+        days.setdefault(p["date"], {"km": 0, "runs": []})["plan"] = {k: p[k] for k in ("type", "distance_km", "status", "race_id")}
+    for r in race_days:
+        days.setdefault(r["date"], {"km": 0, "runs": []})["race"] = {"id": r["id"], "name": r["name"]}
+    for d in days.values():
+        d["km"] = round(d["km"], 1)
+    total = round(sum(d["km"] for d in days.values()), 1)
+    return {"month": first.isoformat()[:7], "today": today.isoformat(), "days": days, "total_km": total,
+            "runs": len(runs), "max_km": max((d["km"] for d in days.values()), default=0)}
+
+
+# ---------- sueño frente a rendimiento ----------
+def sleep_performance(uid: int, days=120):
+    """Cada carrera de los últimos meses con el sueño de la noche anterior y su eficiencia
+    (metros por minuto por pulsación, relativa a tu media: 100 = tu nivel habitual)."""
+    since = (date.today() - timedelta(days=days)).isoformat()
+    rows = db.rows("SELECT a.date, a.distance_m, a.moving_s, a.avg_hr, h.sleep_score, h.sleep_s, h.hrv_night "
+                   "FROM activities a JOIN daily_health h ON h.user_id=a.user_id AND h.date=a.date "
+                   "WHERE a.user_id=? AND a.is_run=1 AND a.date>=? AND a.avg_hr>0 AND a.moving_s>600 AND a.distance_m>2000",
+                   (uid, since))
+    pts = []
+    for r in rows:
+        if r["sleep_score"] is None:
+            continue
+        eff = (r["distance_m"] / (r["moving_s"] / 60)) / r["avg_hr"]
+        pts.append({"date": r["date"], "sleep": r["sleep_score"], "sleep_h": round((r["sleep_s"] or 0) / 3600, 1),
+                    "hrv": r["hrv_night"], "eff": eff})
+    if len(pts) < 5:
+        return {"points": [], "n": len(pts)}
+    mean = sum(p["eff"] for p in pts) / len(pts)
+    for p in pts:
+        p["eff"] = round(100 * p["eff"] / mean, 1)
+    good = [p["eff"] for p in pts if p["sleep"] >= 80]
+    bad = [p["eff"] for p in pts if p["sleep"] < 60]
+    n = len(pts)
+    mx = sum(p["sleep"] for p in pts) / n
+    my = sum(p["eff"] for p in pts) / n
+    sxx = sum((p["sleep"] - mx) ** 2 for p in pts)
+    syy = sum((p["eff"] - my) ** 2 for p in pts)
+    sxy = sum((p["sleep"] - mx) * (p["eff"] - my) for p in pts)
+    r = sxy / (sxx * syy) ** 0.5 if sxx and syy else 0
+    slope = sxy / sxx if sxx else 0
+    return {"points": pts, "n": n, "r": round(r, 2), "slope": round(slope, 3), "intercept": round(my - slope * mx, 2),
+            "good_avg": round(sum(good) / len(good), 1) if len(good) >= 3 else None,
+            "bad_avg": round(sum(bad) / len(bad), 1) if len(bad) >= 3 else None}

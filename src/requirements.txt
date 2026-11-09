@@ -4,3 +4,4 @@ garminconnect==0.3.20
 fitdecode==0.11.0
 cryptography==50.0.1
 python-multipart==0.0.32
+requests==2.34.2

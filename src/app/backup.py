@@ -120,7 +120,7 @@ def create(kind="manual") -> dict:
             os.chmod(final, 0o600)
             state["last_error"] = None
             log.info("Copia creada: %s (%s KB)", name, final.stat().st_size // 1024)
-            return _parse(final)
+            info = _parse(final)
         except BackupError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -129,6 +129,9 @@ def create(kind="manual") -> dict:
             raise BackupError(f"No se pudo crear la copia: {e}")
         finally:
             state["running"] = False
+    from . import remote  # subirla fuera del servidor, si está configurado (en segundo plano)
+    remote.after_backup(info)
+    return info
 
 
 def delete(name: str):

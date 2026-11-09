@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, backup, db, garmin_auth, metrics, plans, races, shoes, stats, sync
+from . import auth, backup, compare, db, garmin_auth, metrics, plans, races, remote, shoes, stats, sync
 from .config import APP_NAME, DEFAULT_SETTINGS, VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -226,6 +226,50 @@ def backups_restore(name: str):
     return _bk(backup.restore_file, _bk(backup.path_for, name))
 
 
+# ---------- copia fuera del servidor ----------
+def _rm(fn, *a):
+    try:
+        return fn(*a)
+    except remote.RemoteError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/admin/remote")
+def remote_get():
+    return remote.public_settings()
+
+
+@app.put("/api/admin/remote")
+def remote_put(payload: dict = Body(...)):
+    return _rm(remote.save_settings, payload)
+
+
+@app.post("/api/admin/remote/test")
+def remote_test():
+    return _rm(remote.test)
+
+
+@app.post("/api/admin/remote/upload")
+def remote_upload():
+    return _rm(remote.upload)
+
+
+@app.post("/api/admin/remote/gdrive/start")
+def remote_gdrive_start():
+    return _rm(remote.gdrive_start)
+
+
+@app.post("/api/admin/remote/gdrive/poll")
+def remote_gdrive_poll():
+    return _rm(remote.gdrive_poll)
+
+
+@app.delete("/api/admin/remote/gdrive")
+def remote_gdrive_disconnect():
+    remote.gdrive_disconnect()
+    return {"ok": True}
+
+
 @app.post("/api/admin/backups-restore-upload")
 async def backups_restore_upload(file: UploadFile = File(...)):
     import tempfile
@@ -327,10 +371,29 @@ def get_settings(request: Request):
 @app.put("/api/settings")
 def put_settings(request: Request, payload: dict = Body(...)):
     uid = _uid(request)
+    if "widgets" in payload:
+        ws = payload["widgets"]
+        if not isinstance(ws, list) or len(ws) > 60:
+            raise HTTPException(400, "Widgets no válidos")
+        clean = []
+        for w in ws:
+            if not isinstance(w, dict) or not isinstance(w.get("id"), str) or len(w["id"]) > 40:
+                raise HTTPException(400, "Widgets no válidos")
+            cols = w.get("cols") if w.get("cols") in (3, 4, 6, 8, 12) else (8 if w.get("wide") else 4)
+            clean.append({"id": w["id"], "visible": bool(w.get("visible", True)), "wide": cols >= 8, "cols": cols})
+        payload["widgets"] = clean
     for k, v in payload.items():
         if k in DEFAULT_SETTINGS:
             db.set_setting(uid, k, v)
     return db.all_settings(uid)
+
+
+@app.get("/api/calendar")
+def calendar(request: Request, month: str = ""):
+    try:
+        return stats.calendar(_uid(request), month)
+    except ValueError:
+        raise HTTPException(400, "Mes no válido")
 
 
 # ---------- datos ----------
@@ -425,6 +488,19 @@ def get_stats(request: Request, group: str = "month"):
     if group not in ("week", "month", "year"):
         group = "month"
     return stats.stats(_uid(request), group)
+
+
+@app.get("/api/compare")
+def get_compare(request: Request, a_from: str, a_to: str, b_from: str, b_to: str):
+    try:
+        return compare.compare(_uid(request), a_from, a_to, b_from, b_to)
+    except compare.CompareError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/compare/presets")
+def get_compare_presets(request: Request):
+    return compare.presets(_uid(request))
 
 
 @app.get("/api/health")

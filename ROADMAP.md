@@ -18,11 +18,12 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
   proyección de la forma con afinamiento hasta el día, lista de preparación y resultado automático.
 - **0.8.0** Plan de entrenamiento para cada objetivo: fases, volumen progresivo con descargas,
   sesiones con ritmos de Daniels, seguimiento automático de lo hecho y widget «Hoy toca».
+- **0.8.1–0.8.2** Cabecera en iPhone, estado de la sincronización más claro, salud a 7 días.
+- **0.9.0** Copia fuera del servidor (Nextcloud/WebDAV o Google Drive), comparar dos periodos,
+  ritmo cumplido en las sesiones del plan e inicio con cuadrícula libre (calendario, sueño y rendimiento).
 
 ## Más adelante
 
-- **Copia fuera del servidor**: enviar automáticamente cada copia a otro sitio (por ejemplo una
-  carpeta de Nextcloud sincronizada con tu ordenador) para protegerte de un fallo del disco.
 - **HTTPS con Tailscale**, que desbloquea **Face ID con passkeys**, **notificaciones push** en el
   móvil (zapatillas, sesión de Garmin caducada, resumen semanal) y el modo sin conexión de la app.
 - **Importar las zapatillas de Garmin Connect** (el «equipo» que ya tengas dado de alta allí) y su
@@ -31,11 +32,7 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
   con la contraseña como respaldo.
 - **Zonas e historial del atleta** (Elevate): FC máxima, de reposo y umbral con fecha, para que las
   carreras antiguas se analicen con los valores que tenías entonces.
-- **Strava** como fuente complementaria (segmentos, kudos) o alternativa a Garmin.
-- **Inicio con cuadrícula libre:** widgets redimensionables y nuevos widgets (objetivos, calendario
-  del mes, sueño frente a rendimiento).
-- **Comparar dos periodos** lado a lado (intervals.icu).
-- **Rutas repetidas** detectadas automáticamente y tu evolución en ellas (intervals.icu).
+- **Strava** como fuente complementaria (segmentos, kudos) o alternativa a Garmin. *(en curso, 0.10.0)*
+- **Rutas repetidas** detectadas automáticamente y tu evolución en ellas (intervals.icu). *(en curso, 0.10.0)*
 - **Preguntas en lenguaje natural** sobre tus datos usando un modelo local (Ollama).
-- **Plan de entrenamiento, siguiente paso:** comprobar si cada sesión se hizo al ritmo previsto
-  (series y tramos a partir de las vueltas) y exportar las sesiones al reloj como entrenamientos de Garmin.
+- **Plan de entrenamiento, siguiente paso:** exportar las sesiones al reloj como entrenamientos de Garmin.
