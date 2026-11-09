@@ -1,8 +1,13 @@
 name: Publicar versión
 
-# Se lanza al crear una etiqueta vX.Y.Z (por ejemplo desde "Releases → Draft a new release").
+# Dos formas de publicar:
+#  1. Cambiar el número del archivo VERSION (y las notas en RELEASE_NOTES.md) y subirlo a main.
+#     La acción crea la etiqueta vX.Y.Z y el Release de GitHub automáticamente.
+#  2. Crear un Release desde GitHub ("Releases → Draft a new release") con una etiqueta vX.Y.Z.
 on:
   push:
+    branches: [main]
+    paths: ["VERSION"]
     tags: ["v*.*.*"]
 
 permissions:
@@ -26,15 +31,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            # Notas: el texto del Release de GitHub, o si no el mensaje de la etiqueta
+            sleep 5
+            gh release view "$GITHUB_REF_NAME" --json body -q .body > notes.txt 2>/dev/null || true
+            if [ ! -s notes.txt ]; then git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.txt; fi
+            echo "create_release=false" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="$(tr -d ' \n\r' < VERSION)"
+            if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "VERSION no tiene formato X.Y.Z: '$VERSION'"; exit 1
+            fi
+            if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+              echo "La versión v$VERSION ya existe; sube el número en VERSION."; exit 1
+            fi
+            cp RELEASE_NOTES.md notes.txt 2>/dev/null || echo "Versión $VERSION." > notes.txt
+            echo "create_release=true" >> "$GITHUB_OUTPUT"
+          fi
           OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "image=ghcr.io/$OWNER/modo-guerrero" >> "$GITHUB_OUTPUT"
-          # Notas: el texto del Release de GitHub, o si no el mensaje de la etiqueta
-          sleep 5
-          gh release view "$GITHUB_REF_NAME" --json body -q .body > notes.txt 2>/dev/null || true
-          if [ ! -s notes.txt ]; then git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.txt; fi
-          cat notes.txt
+          echo "Versión $VERSION"; cat notes.txt
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -62,6 +80,14 @@ jobs:
             org.opencontainers.image.title=Modo Guerrero
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Crear la etiqueta y el Release de GitHub
+        if: steps.v.outputs.create_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.v.outputs.version }}" --target "$GITHUB_SHA" \
+            --title "Modo Guerrero ${{ steps.v.outputs.version }}" --notes-file notes.txt
 
       - name: Actualizar la ficha de Umbrel
         run: |

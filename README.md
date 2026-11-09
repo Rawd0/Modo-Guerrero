@@ -25,14 +25,20 @@ vuelve a abrir la tienda.)
 
 ## Publicar una versión nueva
 
-1. Sube los cambios a `main` (la acción **Comprobaciones** verifica que la app arranca).
-2. En GitHub: **Releases → Draft a new release**, crea una etiqueta `vX.Y.Z` (por ejemplo `v0.1.1`),
-   escribe las novedades y pulsa **Publish release**.
-   Alternativa desde la terminal: `git tag -a v0.1.1 -m "Novedades…" && git push origin v0.1.1`.
-3. La acción **Publicar versión**:
-   - construye la imagen para amd64 y arm64 y la publica en `ghcr.io/rawd0/modo-guerrero`,
-   - mete la versión en la app (se ve en el banner),
-   - actualiza `modo-guerrero-app/` con la nueva versión, la imagen fijada por su digest y las notas.
+Opción sencilla (la que uso yo):
+
+1. Cambia el número en el archivo `VERSION` (por ejemplo `0.1.1`) y escribe las novedades en `RELEASE_NOTES.md`.
+2. Sube los cambios a `main`.
+
+Opción desde la web de GitHub: **Releases → Draft a new release**, etiqueta `vX.Y.Z`, novedades y **Publish release**.
+
+En ambos casos la acción **Publicar versión**:
+- construye la imagen para amd64 y arm64 y la publica en `ghcr.io/rawd0/modo-guerrero`,
+- mete la versión en la app (se ve en el banner),
+- crea el Release de GitHub (en la opción sencilla),
+- actualiza `modo-guerrero-app/` con la nueva versión, la imagen fijada por su digest y las notas.
+
+Antes, la acción **Comprobaciones** verifica en cada cambio que la app arranca y responde.
 
 ### Primera vez: hacer pública la imagen
 
