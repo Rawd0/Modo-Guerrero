@@ -189,6 +189,12 @@ def store_derived(activity_id, stream):
         for dur, dist in bd.items():
             con.execute("INSERT INTO best_durations VALUES (?,?,?)", (activity_id, dur, dist))
         con.execute("UPDATE activities SET gap_pace=?, derived_v=? WHERE id=?", (gp, DERIVED_VERSION, activity_id))
+    from . import routes  # ruta repetida (necesita el GPS del registro)
+    try:
+        routes.assign(activity_id, stream)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("guerrero.routes").exception("Asignando ruta a %s", activity_id)
     return be
 
 

@@ -15,7 +15,7 @@ from .config import DB_PATH, DEFAULT_SETTINGS
 
 log = logging.getLogger("guerrero.db")
 _lock = threading.RLock()
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS activities (
     gap_pace REAL,
     derived_v INTEGER DEFAULT 0,
     shoe_id INTEGER,
+    route_id INTEGER,
     raw TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_act_date ON activities(date);
@@ -130,6 +131,42 @@ CREATE TABLE IF NOT EXISTS plan_sessions (
 );
 CREATE INDEX IF NOT EXISTS ix_psess_plan ON plan_sessions(plan_id, date);
 CREATE INDEX IF NOT EXISTS ix_psess_user ON plan_sessions(user_id, date);
+CREATE TABLE IF NOT EXISTS routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT,
+    rep_activity_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS route_sigs (
+    activity_id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    start_lat REAL, start_lon REAL, end_lat REAL, end_lon REAL,
+    dist_m REAL, pts TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_rsig ON route_sigs(user_id, dist_m);
+CREATE TABLE IF NOT EXISTS strava_activities (
+    strava_id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    activity_id INTEGER,
+    name TEXT,
+    kudos INTEGER, achievements INTEGER, prs INTEGER, comments INTEGER,
+    detail_fetched INTEGER DEFAULT 0,
+    raw TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_stra_act ON strava_activities(activity_id);
+CREATE TABLE IF NOT EXISTS strava_efforts (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    activity_id INTEGER,
+    segment_id INTEGER,
+    segment_name TEXT,
+    distance_m REAL, elapsed_s REAL, moving_s REAL,
+    pr_rank INTEGER, kom_rank INTEGER,
+    avg_grade REAL, climb_category INTEGER, avg_hr REAL,
+    date TEXT, city TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_seff_seg ON strava_efforts(user_id, segment_id);
+CREATE INDEX IF NOT EXISTS ix_seff_act ON strava_efforts(activity_id);
 CREATE TABLE IF NOT EXISTS daily_health (
     user_id INTEGER NOT NULL DEFAULT 0,
     date TEXT NOT NULL,
@@ -179,7 +216,7 @@ CREATE INDEX IF NOT EXISTS ix_sync_user ON sync_log(user_id, id);
 
 # tablas con datos de cada usuario (best_efforts y streams cuelgan de activities)
 USER_TABLES = ("activities", "daily_health", "snapshots", "sync_log", "user_settings", "shoes", "races",
-               "training_plans", "plan_sessions")
+               "training_plans", "plan_sessions", "routes", "route_sigs", "strava_activities", "strava_efforts")
 
 
 def connect():
@@ -237,7 +274,8 @@ def _migrate(con):
     # v3: GAP, versión de cálculos derivados y zapatilla de cada carrera
     if _exists(con, "activities"):
         have = _cols(con, "activities")
-        for col, typ in (("gap_pace", "REAL"), ("derived_v", "INTEGER DEFAULT 0"), ("shoe_id", "INTEGER")):
+        for col, typ in (("gap_pace", "REAL"), ("derived_v", "INTEGER DEFAULT 0"), ("shoe_id", "INTEGER"),
+                         ("route_id", "INTEGER")):  # v7: ruta repetida
             if col not in have:
                 con.execute(f"ALTER TABLE activities ADD COLUMN {col} {typ}")
     # v6: cómo se hizo cada sesión del plan (ritmo cumplido)
@@ -273,7 +311,8 @@ def claim_unassigned(user_id: int):
             + con.execute("SELECT COUNT(*) FROM user_settings WHERE user_id=0").fetchone()[0]
         if not n:
             return
-        for t in ("activities", "daily_health", "snapshots", "sync_log", "shoes", "races", "training_plans", "plan_sessions"):
+        for t in ("activities", "daily_health", "snapshots", "sync_log", "shoes", "races", "training_plans", "plan_sessions",
+                  "routes", "route_sigs", "strava_activities", "strava_efforts"):
             con.execute(f"UPDATE OR IGNORE {t} SET user_id=? WHERE user_id=0", (user_id,))
         con.execute("INSERT OR IGNORE INTO user_settings (user_id, key, value) "
                     "SELECT ?, key, value FROM user_settings WHERE user_id=0", (user_id,))

@@ -385,3 +385,9 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .cmp-table td.l { white-space: normal; min-width: 100px; }
 @media (max-width: 760px) { .cmp-table td.l { font-size: 12.5px; } .cmp-table .delta { padding: 2px 4px; font-size: 12px; } }
 @media (max-width: 760px) { .cmp-table th, .cmp-table td { padding-left: 4px; padding-right: 4px; } .cmp-table td.l { min-width: 84px; } }
+/* ---- rutas y Strava */
+.tag.strava { color: #fc4c02; background: color-mix(in srgb, #fc4c02 14%, transparent); }
+.route-card { display: grid; grid-template-columns: 96px 1fr; gap: 14px; align-items: center; }
+.route-svg { width: 96px; height: 96px; background: var(--card-2); border-radius: 12px; }
+tr.best-row td { background: color-mix(in srgb, var(--good) 10%, transparent); }
+@media (max-width: 1440px) and (min-width: 761px) { nav a { padding: 7px 9px; font-size: 14.5px; } .topbar { gap: 12px; } }

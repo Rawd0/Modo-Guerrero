@@ -21,6 +21,8 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
 - **0.8.1–0.8.2** Cabecera en iPhone, estado de la sincronización más claro, salud a 7 días.
 - **0.9.0** Copia fuera del servidor (Nextcloud/WebDAV o Google Drive), comparar dos periodos,
   ritmo cumplido en las sesiones del plan e inicio con cuadrícula libre (calendario, sueño y rendimiento).
+- **0.10.0** Rutas repetidas con tu evolución en cada una y Strava como fuente complementaria
+  (kudos, logros, segmentos con historial e importación de las carreras que sólo estén en Strava).
 
 ## Más adelante
 
@@ -32,7 +34,6 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
   con la contraseña como respaldo.
 - **Zonas e historial del atleta** (Elevate): FC máxima, de reposo y umbral con fecha, para que las
   carreras antiguas se analicen con los valores que tenías entonces.
-- **Strava** como fuente complementaria (segmentos, kudos) o alternativa a Garmin. *(en curso, 0.10.0)*
-- **Rutas repetidas** detectadas automáticamente y tu evolución en ellas (intervals.icu). *(en curso, 0.10.0)*
+- **Strava como fuente única** para quien no use Garmin (salud y forma desde otras fuentes).
 - **Preguntas en lenguaje natural** sobre tus datos usando un modelo local (Ollama).
 - **Plan de entrenamiento, siguiente paso:** exportar las sesiones al reloj como entrenamientos de Garmin.

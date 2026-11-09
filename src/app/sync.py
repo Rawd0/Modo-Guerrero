@@ -132,6 +132,9 @@ def _merge_manual_duplicate(uid, row):
         con.execute("UPDATE streams SET activity_id=? WHERE activity_id=?", (row["id"], dup["id"]))
         con.execute("UPDATE best_efforts SET activity_id=? WHERE activity_id=?", (row["id"], dup["id"]))
         con.execute("UPDATE best_durations SET activity_id=? WHERE activity_id=?", (row["id"], dup["id"]))
+        con.execute("UPDATE route_sigs SET activity_id=? WHERE activity_id=?", (row["id"], dup["id"]))
+        con.execute("UPDATE routes SET rep_activity_id=? WHERE rep_activity_id=?", (row["id"], dup["id"]))
+        con.execute("UPDATE activities SET route_id=(SELECT route_id FROM activities WHERE id=?) WHERE id=?", (dup["id"], row["id"]))
         con.execute("UPDATE activities SET fit_status='ok', "
                     "gap_pace=(SELECT gap_pace FROM activities WHERE id=?), "
                     "derived_v=(SELECT derived_v FROM activities WHERE id=?), "
@@ -300,14 +303,21 @@ def run_sync(uid: int):
                               (uid, state["last_start"]))
             log_id = cur.lastrowid
         msg, status = "", "ok"
+        from . import strava
         try:
-            g = garmin_auth.get_client(uid)
-            new = sync_activities(uid, g, state)
-            days = sync_health(uid, g, state)
-            sync_snapshot(uid, g, state)
-            fits = sync_fit_files(uid, g, state)
-            garmin_auth.persist_refreshed(uid, g)
-            msg = f"{new} actividades nuevas, {days} días de salud, {fits} detalles descargados"
+            if garmin_auth.is_connected(uid):
+                g = garmin_auth.get_client(uid)
+                new = sync_activities(uid, g, state)
+                days = sync_health(uid, g, state)
+                sync_snapshot(uid, g, state)
+                fits = sync_fit_files(uid, g, state)
+                garmin_auth.persist_refreshed(uid, g)
+                msg = f"{new} actividades nuevas, {days} días de salud, {fits} detalles descargados"
+            if strava.is_connected(uid):
+                # Strava después de Garmin: así sus carreras se enlazan con las de Garmin ya guardadas
+                state["phase"] = "Strava"
+                smsg = strava.run(uid)
+                msg = f"{msg} · {smsg}" if msg and smsg else (msg or smsg)
             state["last_ok"] = _now()
         except garmin_auth.AuthError as e:
             status, msg = "auth", str(e)
@@ -333,7 +343,9 @@ def trigger(uid: int):
 
 
 def _connected_users():
-    return [r["id"] for r in db.rows("SELECT id FROM users ORDER BY id") if garmin_auth.is_connected(r["id"])]
+    from . import strava
+    return [r["id"] for r in db.rows("SELECT id FROM users ORDER BY id")
+            if garmin_auth.is_connected(r["id"]) or strava.is_connected(r["id"])]
 
 
 def scheduler_loop():
@@ -360,6 +372,10 @@ def _backfill():
         n = metrics.backfill_derived()
         if n:
             log.info("Recalculados GAP y curva de ritmo de %s carreras", n)
+        from . import routes
+        n = routes.backfill()
+        if n:
+            log.info("Rutas repetidas analizadas en %s carreras", n)
     except Exception:  # noqa: BLE001
         log.exception("Recalculando datos derivados")
 

@@ -197,7 +197,11 @@ def restore_file(gz_path: Path) -> dict:
                 dst.close()
         db.init()  # migra la copia si es de una versión anterior
     # recalcular en segundo plano lo derivado (GAP, curva de ritmo) si la copia es de una versión anterior
-    threading.Thread(target=metrics.backfill_derived, daemon=True, name="backfill-restore").start()
+    def _after():
+        from . import routes
+        metrics.backfill_derived()
+        routes.backfill()
+    threading.Thread(target=_after, daemon=True, name="backfill-restore").start()
     log.info("Copia restaurada (%s usuarios, %s carreras)", info["users"], info["runs"])
     return {**info, "safety_backup": safety["name"]}
 

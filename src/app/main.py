@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, backup, compare, db, garmin_auth, metrics, plans, races, remote, shoes, stats, sync
+from . import auth, backup, compare, db, garmin_auth, metrics, plans, races, remote, routes, shoes, stats, strava, sync
 from .config import APP_NAME, DEFAULT_SETTINGS, VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -317,9 +317,101 @@ def retry_details(request: Request):
 @app.post("/api/sync")
 def sync_now(request: Request):
     uid = _uid(request)
-    if not garmin_auth.is_connected(uid):
-        raise HTTPException(400, "Conecta primero tu cuenta de Garmin")
+    if not garmin_auth.is_connected(uid) and not strava.is_connected(uid):
+        raise HTTPException(400, "Conecta primero tu cuenta de Garmin o de Strava")
     sync.trigger(uid)
+    return {"ok": True}
+
+
+# ---------- Strava ----------
+def _sv(fn, *a):
+    try:
+        return fn(*a)
+    except strava.StravaError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/strava")
+def strava_get(request: Request):
+    return strava.public(_uid(request))
+
+
+@app.put("/api/strava")
+def strava_put(request: Request, payload: dict = Body(...)):
+    return _sv(strava.save_settings, _uid(request), payload)
+
+
+@app.post("/api/strava/connect")
+def strava_connect(request: Request, payload: dict = Body(...)):
+    from urllib.parse import urlparse
+    origin = str(payload.get("origin") or "")
+    u = urlparse(origin)
+    if u.scheme not in ("http", "https") or not u.netloc or u.path not in ("", "/"):
+        raise HTTPException(400, "Dirección de la app no válida")
+    return {"url": _sv(strava.authorize_url, _uid(request), origin.rstrip("/") + "/api/strava/callback")}
+
+
+@app.get("/api/strava/callback")
+def strava_callback(request: Request, code: str = "", state: str = "", scope: str = "", error: str = ""):
+    from fastapi.responses import RedirectResponse
+    from urllib.parse import quote
+    uid = _uid(request)
+    if error:
+        msg = "Has cancelado la conexión con Strava" if error == "access_denied" else f"Strava: {error}"
+        return RedirectResponse(f"/#/ajustes?strava={quote(msg)}", status_code=303)
+    try:
+        strava.callback(uid, code, state, scope)
+    except (strava.StravaError, Exception) as e:  # noqa: BLE001
+        return RedirectResponse(f"/#/ajustes?strava={quote(str(e))}", status_code=303)
+    strava.run_async(uid)
+    return RedirectResponse("/#/ajustes?strava=ok", status_code=303)
+
+
+@app.post("/api/strava/sync")
+def strava_sync(request: Request):
+    uid = _uid(request)
+    if not strava.is_connected(uid):
+        raise HTTPException(400, "Strava no está conectado")
+    strava.run_async(uid)
+    return {"ok": True}
+
+
+@app.delete("/api/strava")
+def strava_disconnect(request: Request):
+    strava.disconnect(_uid(request))
+    return {"ok": True}
+
+
+@app.get("/api/segments")
+def segments_list(request: Request):
+    return strava.top_segments(_uid(request))
+
+
+@app.get("/api/segments/{segment_id}")
+def segment_detail(request: Request, segment_id: int):
+    return _sv(strava.segment, _uid(request), segment_id)
+
+
+# ---------- rutas repetidas ----------
+@app.get("/api/routes")
+def routes_list(request: Request):
+    return routes.list_routes(_uid(request))
+
+
+@app.get("/api/routes/{route_id}")
+def route_detail(request: Request, route_id: int):
+    try:
+        return routes.detail(_uid(request), route_id)
+    except routes.RouteError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.put("/api/routes/{route_id}")
+def route_rename(request: Request, route_id: int, payload: dict = Body(...)):
+    try:
+        routes.rename(_uid(request), route_id, payload.get("name"))
+    except routes.RouteError as e:
+        raise HTTPException(400, str(e))
     return {"ok": True}
 
 
@@ -475,6 +567,8 @@ def activity(request: Request, aid: int):
         "splits": metrics.km_splits(st) if st else [],
         "efforts": efforts,
         "zones": zones,
+        "route": routes.for_activity(uid, aid),
+        "strava": strava.for_activity(uid, aid),
     }
 
 

@@ -233,15 +233,17 @@ $("#syncBtn").addEventListener("click", async () => {
 
 // ---------------------------------------------------------------- router
 const routes = {};
+let HASH_QUERY = new URLSearchParams();
 let current = null;
 function route(name, fn) { routes[name] = fn; }
 async function rerender() {
-  const hash = location.hash.replace(/^#\/?/, "");
+  const [hash, query] = location.hash.replace(/^#\/?/, "").split("?");
+  HASH_QUERY = new URLSearchParams(query || "");
   const [name, ...args] = hash.split("/");
   const key = name || "home";
   current = key;
   disposeAll();
-  $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === ({ carrera: "carreras", objetivo: "objetivos", plan: "objetivos" }[key] || key)));
+  $$("#nav a").forEach((a) => a.classList.toggle("active", a.dataset.route === ({ carrera: "carreras", objetivo: "objetivos", plan: "objetivos", ruta: "rutas", segmento: "rutas", comparar: "stats" }[key] || key)));
   const view = $("#view");
   view.innerHTML = `<div class="skeleton"></div>`;
   try {
@@ -733,7 +735,9 @@ route("carrera", async (view, id) => {
     <div class="page-head">
       <div><a class="muted" href="#/carreras">← Carreras</a><h1>${esc(a.name)}</h1>
       <div class="sub">${fdate(a.date)} · ${(a.start_local || "").slice(11, 16)} · <span class="tag">${sportName(a.sport)}</span>
-      ${prs.length ? ` <span class="tag accent">🏅 ${prs.length} récord${prs.length > 1 ? "s" : ""}</span>` : ""}</div></div>
+      ${prs.length ? ` <span class="tag accent">🏅 ${prs.length} récord${prs.length > 1 ? "s" : ""}</span>` : ""}
+      ${d.route ? ` <a class="tag blue" href="#/ruta/${d.route.id}">↻ ${esc(d.route.name)} · ${d.route.rank === 1 ? "🥇 la más rápida" : `${d.route.rank}.ª de ${d.route.count}`}</a>` : ""}
+      ${d.strava ? ` <a class="tag strava" href="${esc(d.strava.url)}" target="_blank" rel="noopener">Strava${d.strava.kudos ? ` · 👍 ${d.strava.kudos}` : ""}${d.strava.achievements ? ` · 🏆 ${d.strava.achievements}` : ""}</a>` : ""}</div></div>
     </div>
     <div class="card"><div class="detail-head">
       <div class="kpi"><div class="v num">${km(a.distance_m)} km</div><div class="l">Distancia</div></div>
@@ -760,6 +764,7 @@ route("carrera", async (view, id) => {
       </div>
     </div>
     <div class="card" style="margin-top:16px"><h3>Ritmo, frecuencia cardiaca y altitud</h3><div class="chart xl" id="cStreams"></div></div>
+    ${d.strava && d.strava.efforts.length ? `<div class="card" style="margin-top:16px"><h3>Segmentos de Strava <span class="tag">${d.strava.efforts.length}</span></h3>${effortsTable(d.strava.efforts)}</div>` : ""}
     <div class="card" style="margin-top:16px"><h3>Parciales por kilómetro</h3><div class="table-wrap" style="border:0"><table>
       <thead><tr><th>Km</th><th class="l">Ritmo</th><th title="Ritmo ajustado a la pendiente">GAP</th><th>Tiempo</th><th>FC</th><th>Cadencia</th><th>Desnivel</th></tr></thead>
       <tbody>${splitsRows(d.splits)}</tbody></table></div></div>`
@@ -772,6 +777,118 @@ route("carrera", async (view, id) => {
   if (s.lat && s.lat.some(Boolean)) map($("#mDet"), s.lat.map((la, i) => [la, s.lon[i]]).filter((p) => p[0] && p[1]), { zoom: true });
   if (d.zones) renderZones($("#zones"), d.zones);
   streamsChart($("#cStreams"), s);
+});
+
+function prMedal(rank) { return rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : ""; }
+function effortsTable(efforts) {
+  return `<div class="table-wrap" style="border:0"><table>
+    <thead><tr><th class="l">Segmento</th><th>Distancia</th><th>Pendiente</th><th>Tiempo</th><th>Ritmo</th><th>FC</th><th>Tu mejor</th><th>Veces</th></tr></thead>
+    <tbody>${efforts.map((e) => `<tr>
+      <td class="l"><a href="#/segmento/${e.segment_id}">${esc(e.segment_name)}</a> ${e.pr_rank ? `<span title="${e.pr_rank === 1 ? "Tu mejor marca" : e.pr_rank + ".º mejor tiempo tuyo"}">${prMedal(e.pr_rank)}</span>` : ""}${e.kom_rank ? ` <span class="tag warn" style="font-size:10px">Top ${e.kom_rank}</span>` : ""}</td>
+      <td class="num">${e.distance_m >= 1000 ? km(e.distance_m) + " km" : nf0.format(e.distance_m) + " m"}</td>
+      <td class="num">${e.avg_grade != null ? nf1.format(e.avg_grade) + " %" : "–"}</td>
+      <td class="num">${dur(e.elapsed_s)}</td><td class="num">${pace(e.elapsed_s / (e.distance_m / 1000))}</td><td class="num">${int(e.avg_hr)}</td>
+      <td class="num ${e.best === e.elapsed_s ? "pr" : "faint"}">${dur(e.best)}</td><td class="num">${e.n}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+// ================================================================ RUTAS REPETIDAS Y SEGMENTOS
+// dibujo ligero del recorrido (sin mapa) para las tarjetas
+function routeSvg(pts, color) {
+  if (!pts || pts.length < 2) return "";
+  const lat0 = pts.reduce((a, p) => a + p[0], 0) / pts.length, k = Math.cos((lat0 * Math.PI) / 180);
+  const xs = pts.map((p) => p[1] * k), ys = pts.map((p) => -p[0]);
+  const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
+  const span = Math.max(maxx - minx, maxy - miny) || 1e-9, W = 100, pad = 6;
+  const sx = (x) => pad + ((x - minx) / span) * (W - 2 * pad) + ((span - (maxx - minx)) / span) * (W - 2 * pad) / 2;
+  const sy = (y) => pad + ((y - miny) / span) * (W - 2 * pad) + ((span - (maxy - miny)) / span) * (W - 2 * pad) / 2;
+  const d = xs.map((x, i) => `${i ? "L" : "M"}${sx(x).toFixed(1)},${sy(ys[i]).toFixed(1)}`).join(" ");
+  return `<svg viewBox="0 0 ${W} ${W}" class="route-svg"><path d="${d}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="${sx(xs[0]).toFixed(1)}" cy="${sy(ys[0]).toFixed(1)}" r="3.5" fill="var(--good)"/></svg>`;
+}
+let rutasTab = "rutas";
+route("rutas", async (view) => {
+  const [R, SEG] = await Promise.all([api("/api/routes"), api("/api/segments")]);
+  const t = theme();
+  view.innerHTML = `
+    <div class="page-head"><div><h1>Rutas</h1><div class="sub">Los recorridos que repites y tu evolución en ellos</div></div>
+      <div class="seg" id="rTabs"><button data-t="rutas" class="${rutasTab === "rutas" ? "on" : ""}">Rutas repetidas (${R.length})</button><button data-t="seg" class="${rutasTab === "seg" ? "on" : ""}">Segmentos de Strava (${SEG.length})</button></div></div>
+    ${rutasTab === "rutas" ? (R.length ? `<div class="grid">${R.map((r) => {
+      const trend = r.recent_pace && r.avg_pace ? r.recent_pace - r.avg_pace : null;
+      return `<a class="card route-card" href="#/ruta/${r.id}">
+        ${routeSvg(r.pts, t.accent)}
+        <div style="min-width:0"><div class="mid" style="font-size:16px">${esc(r.name)}</div>
+          <div class="muted" style="font-size:13px">${km(r.dist_m)} km · <b>${r.count}</b> veces · última ${fdateShort(r.last)} ${r.last.slice(0, 4)}</div>
+          <div style="margin-top:8px;font-size:13px">Mejor: <b class="num">${dur(r.best.time_s)}</b> <span class="faint">(${pace(r.best.pace)} /km, ${fdateShort(r.best.date)} ${r.best.date.slice(2, 4)})</span></div>
+          ${trend != null && r.count >= 4 ? `<div style="margin-top:4px"><span class="tag ${trend < -2 ? "good" : trend > 2 ? "warn" : ""}">Últimas 3: ${trend < -2 ? "más rápido" : trend > 2 ? "más lento" : "igual"} que tu media (${trend > 0 ? "+" : "−"}${Math.abs(Math.round(trend))} s/km)</span></div>` : ""}</div>
+      </a>`; }).join("")}</div>`
+      : `<div class="card empty"><h2>Aún no hay rutas repetidas</h2><p>Cuando hagas dos o más veces el mismo recorrido (misma salida, llegada y camino), aparecerá aquí para que veas tu evolución en él. Se analizan solas las carreras con GPS.</p></div>`)
+    : (SEG.length ? `<div class="table-wrap"><table><thead><tr><th class="l">Segmento</th><th>Distancia</th><th>Pendiente</th><th>Veces</th><th>Tu mejor</th><th>Último</th></tr></thead>
+        <tbody>${SEG.map((g) => `<tr><td class="l"><a href="#/segmento/${g.segment_id}">${esc(g.name)}</a></td><td class="num">${g.distance_m >= 1000 ? km(g.distance_m) + " km" : nf0.format(g.distance_m) + " m"}</td>
+          <td class="num">${g.avg_grade != null ? nf1.format(g.avg_grade) + " %" : "–"}</td><td class="num">${g.n}</td><td class="num">${dur(g.best_s)}</td><td class="num">${g.last ? fdateShort(g.last) : "–"}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="card empty"><h2>Sin segmentos todavía</h2><p>Conecta Strava en Ajustes para ver aquí los segmentos por los que pasas a menudo y tu historial en cada uno.</p><a class="btn primary" href="#/ajustes">Ir a Ajustes</a></div>`)}`;
+  $$("#rTabs button").forEach((b) => (b.onclick = () => { rutasTab = b.dataset.t; rerender(); }));
+});
+
+route("ruta", async (view, id) => {
+  const R = await api(`/api/routes/${id}`);
+  const runs = [...R.runs].reverse(), t = theme();
+  const best = R.runs.reduce((a, x) => (x.pace && (!a || x.pace < a.pace) ? x : a), null);
+  view.innerHTML = `
+    <div class="page-head"><div><a class="muted" href="#/rutas">← Rutas</a><h1 id="rName">${esc(R.name)}</h1>
+      <div class="sub">${km(R.dist_m)} km · ${R.runs.length} veces desde ${fdate(R.runs[0].date)}</div></div>
+      <button class="btn" id="rRename">Cambiar nombre</button></div>
+    <div class="two-col">
+      <div class="card map-card"><div class="map tall" id="rMap"></div></div>
+      <div class="card"><h3>Tu evolución en esta ruta</h3><div class="chart" id="rChart" style="height:300px"></div>
+        <p class="faint" style="font-size:12px;margin:6px 0 0">Ritmo de cada vez (más arriba = más rápido) y FC media. Si con el tiempo vas más rápido a la misma FC, estás en mejor forma.</p></div>
+    </div>
+    <div class="card" style="margin-top:16px"><h3>Todas las veces</h3><div class="table-wrap" style="border:0"><table>
+      <thead><tr><th class="l">Fecha</th><th class="l">Nombre</th><th>Puesto</th><th>Tiempo</th><th>Ritmo</th><th>GAP</th><th>FC</th><th title="Metros por minuto por pulsación: más es mejor">Eficiencia</th></tr></thead>
+      <tbody>${runs.map((x) => `<tr ${best && x.id === best.id ? `class="best-row"` : ""}><td class="l num">${fdate(x.date)}</td><td class="l"><a href="#/carrera/${x.id}">${esc(x.name)}</a></td>
+        <td class="num">${x.rank === 1 ? "🥇" : x.rank === 2 ? "🥈" : x.rank === 3 ? "🥉" : x.rank || "–"}</td><td class="num">${dur(x.moving_s)}</td><td class="num">${pace(x.pace)}</td>
+        <td class="num muted">${x.gap_pace ? pace(x.gap_pace) : "–"}</td><td class="num">${int(x.avg_hr)}</td><td class="num">${x.efficiency ? x.efficiency.toFixed(2).replace(".", ",") : "–"}</td></tr>`).join("")}</tbody></table></div></div>`;
+  if (R.track.length) map($("#rMap"), R.track, { zoom: true });
+  $("#rRename").onclick = async () => {
+    const n = prompt("Nombre de la ruta", R.name);
+    if (n == null || !n.trim()) return;
+    try { await api(`/api/routes/${R.id}`, { method: "PUT", body: { name: n.trim() } }); $("#rName").textContent = n.trim(); toast("Nombre guardado"); }
+    catch (e) { toast(e.message, true); }
+  };
+  chart($("#rChart"), {
+    legend: { top: 0, textStyle: { color: t.text } }, grid: { top: 34, bottom: 30, right: 44 },
+    xAxis: { type: "category", data: R.runs.map((x) => x.date), axisLabel: { formatter: (v) => `${fdateShort(v)} ${v.slice(2, 4)}` } },
+    yAxis: [{ type: "value", inverse: true, scale: true, axisLabel: { formatter: (v) => pace(v) } }, { type: "value", scale: true, splitLine: { show: false } }],
+    tooltip: { trigger: "axis", formatter: (ps) => `${fdate(ps[0].axisValue)}<br>` + ps.map((p) => `${p.marker}${p.seriesName}: <b>${p.seriesIndex ? int(p.value) + " ppm" : pace(p.value) + " /km"}</b>`).join("<br>") },
+    series: [
+      { name: "Ritmo", type: "line", data: R.runs.map((x) => x.pace && Math.round(x.pace)), symbolSize: 7, lineStyle: { color: t.accent, width: 2 }, itemStyle: { color: t.accent } },
+      { name: "FC media", type: "line", yAxisIndex: 1, data: R.runs.map((x) => x.avg_hr), symbolSize: 5, lineStyle: { color: t.bad, width: 1.5, type: "dashed" }, itemStyle: { color: t.bad } },
+    ],
+  });
+});
+
+route("segmento", async (view, id) => {
+  const G = await api(`/api/segments/${id}`);
+  const t = theme(), list = [...G.efforts].reverse();
+  view.innerHTML = `
+    <div class="page-head"><div><a class="muted" href="#/rutas">← Rutas</a><h1>${esc(G.name)}</h1>
+      <div class="sub">Segmento de Strava · ${G.distance_m >= 1000 ? km(G.distance_m) + " km" : nf0.format(G.distance_m) + " m"}${G.avg_grade != null ? ` · ${nf1.format(G.avg_grade)} %` : ""}${G.city ? ` · ${esc(G.city)}` : ""}
+        · <a href="${esc(G.url)}" target="_blank" rel="noopener">ver en Strava ↗</a></div></div></div>
+    <div class="grid">
+      <div class="card" style="align-self:start"><h3>Tu mejor marca</h3><div class="big num">${dur(G.best_s)}</div><div class="muted">${pace(G.best_s / (G.distance_m / 1000))} /km · ${G.efforts.length} veces</div></div>
+      <div class="card wide" style="grid-column:span 2"><h3>Evolución</h3><div class="chart" id="sgChart" style="height:240px"></div></div>
+    </div>
+    <div class="card" style="margin-top:16px"><div class="table-wrap" style="border:0"><table>
+      <thead><tr><th class="l">Fecha</th><th class="l">Actividad</th><th>Tiempo</th><th>Ritmo</th><th>FC</th></tr></thead>
+      <tbody>${list.map((e) => `<tr ${e.elapsed_s === G.best_s ? `class="best-row"` : ""}><td class="l num">${fdate(e.date)}</td><td class="l">${e.activity_id ? `<a href="#/carrera/${e.activity_id}">${esc(e.act_name || "Actividad")}</a>` : ""}</td>
+        <td class="num">${e.elapsed_s === G.best_s ? "🥇 " : ""}${dur(e.elapsed_s)}</td><td class="num">${pace(e.elapsed_s / (e.distance_m / 1000))}</td><td class="num">${int(e.avg_hr)}</td></tr>`).join("")}</tbody></table></div></div>`;
+  chart($("#sgChart"), {
+    grid: { top: 16, bottom: 30 },
+    xAxis: { type: "category", data: G.efforts.map((e) => e.date), axisLabel: { formatter: (v) => (v ? `${fdateShort(v)} ${v.slice(2, 4)}` : "") } },
+    yAxis: { type: "value", inverse: true, scale: true, axisLabel: { formatter: (v) => dur(v) } },
+    tooltip: { trigger: "axis", formatter: (ps) => `${fdate(ps[0].axisValue)}<br><b>${dur(ps[0].value)}</b>` },
+    series: [{ type: "line", data: G.efforts.map((e) => e.elapsed_s), symbolSize: 7, lineStyle: { color: t.accent }, itemStyle: { color: t.accent },
+      markLine: { symbol: "none", silent: true, lineStyle: { color: t.good, type: "dashed" }, label: { color: t.text, formatter: "tu mejor" }, data: [{ yAxis: G.best_s }] } }],
+  });
 });
 
 function labelFor(dist) {
@@ -1062,8 +1179,9 @@ route("stats", async (view) => {
   const P = S.periods.slice(statsGroup === "week" ? -52 : statsGroup === "month" ? -36 : -20);
   const label = (p) => statsGroup === "month" ? `${MONTHS[+p.slice(5, 7) - 1]} ${p.slice(2, 4)}` : statsGroup === "week" ? fdateShort(p) : p;
   view.innerHTML = `
-    <div class="page-head"><div><h1>Estadísticas</h1><div class="sub">Desde ${T.first ? fdate(T.first) : "–"} · <a href="#/comparar">Comparar periodos →</a></div></div>
-      <div class="seg" id="grp">${[["week", "Semanas"], ["month", "Meses"], ["year", "Años"]].map(([k, l]) => `<button data-g="${k}" class="${k === statsGroup ? "on" : ""}">${l}</button>`).join("")}</div></div>
+    <div class="page-head"><div><h1>Estadísticas</h1><div class="sub">Desde ${T.first ? fdate(T.first) : "–"}</div></div>
+      <div class="row" style="flex-wrap:wrap"><a class="btn" href="#/comparar">Comparar periodos</a>
+      <div class="seg" id="grp">${[["week", "Semanas"], ["month", "Meses"], ["year", "Años"]].map(([k, l]) => `<button data-g="${k}" class="${k === statsGroup ? "on" : ""}">${l}</button>`).join("")}</div></div></div>
     <div class="grid">
       <div class="card"><h3>Total</h3><div class="big num">${km(T.dist)}<small>km</small></div><div class="muted">${int(T.n)} carreras · ${hours(T.secs)} · ${int(T.elev)} m+</div></div>
       <div class="card"><h3>Ritmo medio histórico</h3><div class="big num">${pace(T.dist ? T.secs / (T.dist / 1000) : null)}<small>/km</small></div><div class="muted">Distancia media ${T.n ? km(T.dist / T.n) : "–"} km por carrera</div></div>
@@ -1607,12 +1725,15 @@ route("ajustes", async (view) => {
   const [st, set, log, sessions, users] = await Promise.all([api("/api/status"), api("/api/settings"), api("/api/sync/log"),
     api("/api/account/sessions"), ME && ME.is_admin ? api("/api/admin/users") : Promise.resolve(null)]);
   const [bk, rm] = ME && ME.is_admin ? await Promise.all([api("/api/admin/backups"), api("/api/admin/remote")]) : [null, null];
+  const sv = await api("/api/strava");
+  const svMsg = HASH_QUERY.get("strava");
   view.innerHTML = `
     <div class="page-head"><div><h1>Ajustes</h1><div class="sub">Modo Guerrero v${esc(st.version)}</div></div></div>
     <div class="grid">
       <div class="card"><h3>Cuenta de Garmin ${st.connected ? `<span class="tag good">Conectada</span>` : `<span class="tag bad">Sin conectar</span>`}</h3>
         <div id="garminBox"></div>
       </div>
+      ${stravaCard(sv, svMsg)}
       <div class="card"><h3>App en el móvil ${IS_STANDALONE ? `<span class="tag good">Instalada</span>` : ""}</h3>
         ${IS_STANDALONE ? `<p class="muted" style="font-size:14px;margin-top:0">Estás usando Modo Guerrero como app. Al volver a ella tras un rato, los datos se actualizan solos.</p>`
         : IS_IOS ? `<ol class="muted" style="font-size:14px;margin:0;padding-left:20px;line-height:1.7">
@@ -1725,6 +1846,8 @@ route("ajustes", async (view) => {
   if (users) setupUserAdmin();
   if (bk) setupBackups(bk);
   if (rm) setupRemote(rm);
+  setupStrava(sv);
+  if (svMsg) history.replaceState(null, "", "#/ajustes");
   const saveAppearance = async (theme, accent) => {
     applyTheme(theme, accent);
     await api("/api/settings", { method: "PUT", body: { theme, accent } });
@@ -1848,6 +1971,63 @@ function setupBackups(bk) {
     try { await api(`/api/admin/backups/${encodeURIComponent(b.dataset.bkdel)}`, { method: "DELETE" }); rerender(); }
     catch (e) { toast(e.message, true); }
   }));
+}
+
+// ---- Strava
+function stravaCard(sv, msg) {
+  const c = sv.counts, st = sv.state;
+  const host = location.hostname;
+  return `<div class="card" id="svCard"><h3>Strava ${sv.connected ? `<span class="tag good">Conectado</span>` : `<span class="tag">Opcional</span>`}</h3>
+    ${msg ? `<p class="tag ${msg === "ok" ? "good" : "bad"}" style="white-space:normal">${msg === "ok" ? "Strava conectado. Empezando a traer tus actividades…" : esc(msg)}</p>` : ""}
+    ${sv.connected ? `
+      <p style="font-size:14px;margin-top:0">Conectado como <b>${esc(sv.athlete && sv.athlete.name || "atleta")}</b>.
+        ${c.strava ? `${int(c.strava)} carreras en Strava: ${int(c.linked - c.imported)} enlazadas con Garmin, ${int(c.imported)} importadas${c.efforts ? ` · ${int(c.efforts)} pasos por ${int(c.segments)} segmentos` : ""}.` : "Aún no se ha sincronizado."}</p>
+      ${st.running ? `<p class="muted" style="font-size:13px">${esc(st.phase || "Sincronizando…")}</p>` : st.last_msg ? `<p class="faint" style="font-size:12px">${esc(st.last_msg)}</p>` : ""}
+      <label class="check"><input type="checkbox" id="svImport" ${sv.import_missing ? "checked" : ""}> Importar las carreras que sólo estén en Strava</label>
+      <label class="check" style="margin-top:6px"><input type="checkbox" id="svSegs" ${sv.segments ? "checked" : ""}> Descargar segmentos, logros y kudos</label>
+      <div class="row" style="margin-top:12px;flex-wrap:wrap"><button class="btn" id="svSync" ${st.running ? "disabled" : ""}>Sincronizar Strava ahora</button><button class="btn ghost" id="svOff" style="color:var(--bad)">Desconectar</button></div>`
+    : `<p class="muted" style="font-size:13px;margin-top:0">Complementa a Garmin: añade kudos, logros y <b>segmentos</b> (con tu historial en cada uno) a tus carreras, e importa las que sólo tengas en Strava.</p>
+      <div class="form-grid" style="grid-template-columns:1fr">
+        <label class="field">Client ID<input type="text" id="svId" inputmode="numeric" value="${esc(sv.client_id)}" autocomplete="off"></label>
+        <label class="field">Client Secret<input type="password" id="svSecret" placeholder="${sv.has_secret ? "•••••••• (guardado)" : ""}" autocomplete="new-password"></label>
+      </div>
+      <div class="row" style="margin-top:12px"><button class="btn" id="svSave">Guardar</button><button class="btn primary" id="svConnect">Conectar con Strava</button></div>
+      <details style="margin-top:10px" ${sv.client_id ? "" : "open"}><summary class="muted" style="cursor:pointer;font-size:13px">Cómo crear tu aplicación de Strava (una vez, 2 minutos)</summary>
+        <ol class="muted" style="font-size:13px;line-height:1.6">
+          <li>Entra en <b>strava.com/settings/api</b> con tu cuenta.</li>
+          <li>Rellena: nombre «Modo Guerrero», categoría «Data Importer», sitio web <code>${esc(location.origin)}</code> y en <b>Authorization Callback Domain</b> escribe exactamente <code>${esc(host)}</code>.</li>
+          <li>Sube cualquier icono, acepta y copia aquí el <b>Client ID</b> y el <b>Client Secret</b>. Pulsa <b>Guardar</b> y luego <b>Conectar con Strava</b>.</li>
+        </ol>
+        <p class="faint" style="font-size:12px">Abre Modo Guerrero siempre con la misma dirección con la que conectes (ahora <code>${esc(host)}</code>): Strava sólo vuelve a esa. Permiso de sólo lectura; los tokens se guardan cifrados. Cada persona de la app conecta su propia cuenta.</p>
+      </details>`}
+  </div>`;
+}
+function setupStrava(sv) {
+  const card = $("#svCard");
+  const save = (body) => api("/api/strava", { method: "PUT", body });
+  if (!sv.connected) {
+    const creds = () => ({ client_id: $("#svId").value.trim(), client_secret: $("#svSecret").value || null });
+    $("#svSave").onclick = async () => { try { await save(creds()); toast("Guardado"); rerender(); } catch (e) { toast(e.message, true); } };
+    $("#svConnect").onclick = async () => {
+      try {
+        await save(creds());
+        const r = await api("/api/strava/connect", { method: "POST", body: { origin: location.origin } });
+        location.href = r.url;
+      } catch (e) { toast(e.message, true); }
+    };
+    return;
+  }
+  $("#svImport").onchange = (e) => save({ import_missing: e.target.checked }).then(() => toast("Guardado"));
+  $("#svSegs").onchange = (e) => save({ segments: e.target.checked }).then(() => toast("Guardado"));
+  $("#svSync").onclick = async () => {
+    await api("/api/strava/sync", { method: "POST" }); toast("Sincronizando Strava…");
+    const poll = async () => { const s = await api("/api/strava"); if (!document.body.contains(card)) return; if (s.state.running) setTimeout(poll, 3000); else rerender(); };
+    setTimeout(poll, 2000);
+  };
+  $("#svOff").onclick = async () => {
+    if (!confirm("¿Desconectar Strava? Las carreras y segmentos ya traídos se conservan.")) return;
+    await api("/api/strava", { method: "DELETE" }); rerender();
+  };
 }
 
 // ---- copia fuera del servidor

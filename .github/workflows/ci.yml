@@ -70,6 +70,11 @@ jobs:
             | python -c "import sys,json;d=json.load(sys.stdin);assert d['a']['runs']>0 and len(d['a']['cum_km'])==28, d['a']"
           curl -fs -b jar localhost:8080/api/calendar | python -c "import sys,json;assert json.load(sys.stdin)['days']"
           test "$(curl -s -b jar -o /dev/null -w '%{http_code}' -X PUT -H "$H" -H "Content-Type: application/json" -d '{"widgets":[{"id":1}]}' localhost:8080/api/settings)" = "400" || { echo "Acepta widgets no válidos"; exit 1; }
+          # rutas repetidas (los datos de ejemplo repiten recorridos) y Strava sin secretos a la vista
+          rtid=$(curl -fs -b jar localhost:8080/api/routes | python -c "import sys,json;d=json.load(sys.stdin);assert d and d[0]['count']>=2, d;print(d[0]['id'])")
+          curl -fs -b jar "localhost:8080/api/routes/$rtid" | python -c "import sys,json;d=json.load(sys.stdin);assert d['runs'] and d['track']"
+          curl -fs -b jar -X PUT -H "$H" -H "Content-Type: application/json" -d '{"client_id":"123","client_secret":"strava-ci"}' localhost:8080/api/strava | grep -qv "strava-ci" || { echo "Se devuelve el secreto de Strava"; exit 1; }
+          test "$(curl -s -b jar -o /dev/null -w '%{http_code}' -X POST -H "$H" -H "Content-Type: application/json" -d '{"origin":"javascript:x"}' localhost:8080/api/strava/connect)" = "400" || { echo "Acepta un origen no válido"; exit 1; }
           # copia fuera del servidor: ajustes sin secretos a la vista
           curl -fs -b jar -X PUT -H "$H" -H "Content-Type: application/json" \
             -d '{"provider":"webdav","webdav":{"url":"http://127.0.0.1:9/dav/","user":"u","folder":"MG","password":"secreto-ci"}}' localhost:8080/api/admin/remote | grep -qv "secreto-ci" || { echo "Se devuelve la contraseña"; exit 1; }
@@ -94,6 +99,9 @@ jobs:
           test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' -X PUT -H "$H" -H "Content-Type: application/json" -d '{"status":"done"}' localhost:8080/api/plan-sessions/$sid)" = "400" || { echo "El segundo usuario cambia sesiones ajenas"; exit 1; }
           test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' localhost:8080/api/admin/backups/$name)" = "403" || { echo "Un usuario normal descarga copias"; exit 1; }
           test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' localhost:8080/api/admin/remote)" = "403" || { echo "Un usuario normal ve la copia remota"; exit 1; }
+          test "$(curl -fs -b jar2 localhost:8080/api/routes)" = "[]" || { echo "El segundo usuario ve rutas ajenas"; exit 1; }
+          test "$(curl -s -b jar2 -o /dev/null -w '%{http_code}' localhost:8080/api/routes/$rtid)" = "404" || { echo "El segundo usuario abre una ruta ajena"; exit 1; }
+          curl -fs -b jar2 localhost:8080/api/strava | python -c "import sys,json;d=json.load(sys.stdin);assert not d['client_id'] and not d['connected'], d"
           # sin la cabecera anti-CSRF, las escrituras se rechazan
           test "$(curl -s -b jar -o /dev/null -w '%{http_code}' -X POST localhost:8080/api/sync)" = "403" || { echo "Falta protección CSRF"; exit 1; }
           curl -fs localhost:8080/ | grep -q "vci" || { echo "La versión no aparece en la página"; exit 1; }
