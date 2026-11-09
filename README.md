@@ -90,3 +90,7 @@ services:
 - No expongas la app a internet; usa Tailscale para entrar desde fuera.
 - El acceso a Garmin usa la librería no oficial `garminconnect`; si Garmin cambia su sistema puede
   fallar temporalmente. Siempre puedes importar archivos .FIT a mano desde Ajustes.
+
+## Próximas mejoras
+
+Ver [ROADMAP.md](ROADMAP.md).
