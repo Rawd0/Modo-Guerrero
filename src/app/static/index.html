@@ -14,6 +14,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="format-detection" content="telephone=no">
   <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32.png">
+  <link rel="icon" type="image/svg+xml" href="/static/icons/logo.svg">
   <link rel="alternate icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23ff6b2c'/><path d='M8 22l6-12 4 8 3-5 3 9' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
   <script>
     // aplicar el tema guardado antes de pintar, para que no parpadee
@@ -29,8 +30,8 @@
 <body>
   <header class="topbar">
     <a class="brand" href="#/">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M8 22l6-12 4 8 3-5 3 9" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>Modo Guerrero</span><small id="version">v__VERSION__</small>
+      <img class="logo" src="/static/icons/logo.svg?v=__VERSION__" alt="" width="32" height="32">
+      <span class="wordmark"><span class="wm-top">MODO</span><span class="wm-main">GUERRERO</span></span><small id="version">v__VERSION__</small>
     </a>
     <nav id="nav">
       <a href="#/" data-route="home">Inicio</a>

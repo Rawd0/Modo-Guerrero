@@ -1405,7 +1405,7 @@ function showAuth(setup) {
   const view = $("#view");
   view.innerHTML = `
     <div class="auth-wrap"><div class="card auth-card">
-      <div class="auth-logo"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M8 22l6-12 4 8 3-5 3 9" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Modo Guerrero</span></div>
+      <div class="auth-logo"><img class="logo" src="/static/icons/logo.svg" alt="" width="44" height="44"><span class="wordmark"><span class="wm-top">MODO</span><span class="wm-main">GUERRERO</span></span></div>
       ${setup ? `<h2>Crea tu cuenta</h2><p class="muted">Es la primera vez que entras. Esta cuenta será la de administrador y con ella entrarás desde cualquier dispositivo.</p>`
               : `<h2>Inicia sesión</h2>`}
       <form id="af" class="form-grid" style="grid-template-columns:1fr">
@@ -1444,7 +1444,7 @@ function showForcedChange() {
   document.body.classList.add("auth-screen");
   $("#view").innerHTML = `
     <div class="auth-wrap"><div class="card auth-card">
-      <div class="auth-logo"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M8 22l6-12 4 8 3-5 3 9" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Modo Guerrero</span></div>
+      <div class="auth-logo"><img class="logo" src="/static/icons/logo.svg" alt="" width="44" height="44"><span class="wordmark"><span class="wm-top">MODO</span><span class="wm-main">GUERRERO</span></span></div>
       <h2>Elige tu contraseña</h2>
       <p class="muted">Hola${ME ? ", <b>" + esc(ME.username) + "</b>" : ""}. Estás usando una contraseña temporal; cámbiala por una que sólo sepas tú.</p>
       <form id="fc" class="form-grid" style="grid-template-columns:1fr">

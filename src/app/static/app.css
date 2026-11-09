@@ -61,8 +61,12 @@ button, input, select { font: inherit; color: inherit; }
   backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; letter-spacing: -.01em; }
-.brand svg { width: 28px; height: 28px; }
-.brand small { font-weight: 500; font-size: 11px; color: var(--faint); margin-left: -4px; align-self: flex-end; padding-bottom: 3px; }
+.brand .logo { width: 32px; height: 32px; border-radius: 8px; flex: none; }
+.brand small { font-weight: 500; font-size: 11px; color: var(--faint); margin-left: -2px; align-self: flex-end; padding-bottom: 1px; }
+/* nombre: «MODO» pequeño en el color principal sobre «GUERRERO» grande */
+.wordmark { display: flex; flex-direction: column; line-height: 1; }
+.wm-top { font-size: 9px; font-weight: 600; letter-spacing: .32em; color: var(--accent); margin-bottom: 2px; }
+.wm-main { font-size: 18px; font-weight: 900; letter-spacing: .06em; color: var(--text); }
 nav { display: flex; gap: 2px; flex: 1; overflow-x: auto; scrollbar-width: none; }
 nav::-webkit-scrollbar { display: none; }
 nav a { padding: 7px 12px; border-radius: 9px; color: var(--muted); font-weight: 500; white-space: nowrap; }
@@ -73,6 +77,7 @@ nav a.active { color: var(--text); background: var(--card-2); box-shadow: inset 
   background: var(--card); border: 1px solid var(--line); cursor: pointer; font-size: 13px; color: var(--muted);
   white-space: nowrap;
 }
+.sync-pill { margin-left: auto; }
 .sync-pill:hover { color: var(--text); border-color: var(--faint); }
 .sync-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
 .sync-pill.ok .dot { background: var(--good); }
@@ -254,7 +259,9 @@ body.auth-screen .topbar { display: none; }
 .auth-card h2 { margin: 18px 0 6px; font-size: 22px; letter-spacing: -.02em; }
 .auth-card p { margin: 0 0 16px; font-size: 14px; }
 .auth-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
-.auth-logo svg { width: 34px; height: 34px; }
+.auth-logo .logo { width: 44px; height: 44px; border-radius: 11px; }
+.auth-logo .wm-top { font-size: 10px; }
+.auth-logo .wm-main { font-size: 21px; }
 .auth-card .btn.primary { padding: 11px 14px; font-size: 16px; }
 .auth-card input { font-size: 16px !important; } /* evita el zoom automático de iOS */
 label.check { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--muted); cursor: pointer; }
