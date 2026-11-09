@@ -12,7 +12,7 @@ services:
 
   web:
     # La acción de GitHub "release" actualiza esta línea en cada versión.
-    image: ghcr.io/rawd0/modo-guerrero:0.6.0@sha256:20232ee149641e08426c124f7b22d0d2d820af23496962cb4247a7fec4707a03
+    image: ghcr.io/rawd0/modo-guerrero:0.6.1@sha256:a8aed2921ab98f3b542825ae1f75d9f83263fd913a718bfeceb44b1097d120f0
     user: "1000:1000"
     init: true
     restart: on-failure
