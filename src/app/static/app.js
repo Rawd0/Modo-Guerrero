@@ -921,13 +921,19 @@ function streamsChart(el, s) {
   const t = theme();
   const x = s.d.map((v) => +(v / 1000).toFixed(3));
   // ritmo suavizado (media móvil) para que no sea ilegible
-  const raw = s.spd.map((v) => (v && v > 0.5 ? 1000 / v : null));
+  // por debajo de 1 m/s (más lento de 16:40 /km) es estar parado: no se dibuja
+  const raw = s.spd.map((v) => (v && v > 1 ? 1000 / v : null));
   const W = 7;
   const pc = raw.map((_, i) => { const w = raw.slice(Math.max(0, i - W), i + W + 1).filter(Boolean); return w.length ? Math.round(w.reduce((a, b) => a + b, 0) / w.length) : null; });
-  const gapRaw = (s.gap_spd || []).map((v) => (v && v > 0.5 ? 1000 / v : null));
+  const gapRaw = (s.gap_spd || []).map((v) => (v && v > 1 ? 1000 / v : null));
   const gap = s.gap_spd ? gapRaw.map((_, i) => { const w = gapRaw.slice(Math.max(0, i - W), i + W + 1).filter(Boolean); return w.length ? Math.round(w.reduce((a, b) => a + b, 0) / w.length) : null; }) : null;
   const valid = pc.filter(Boolean).sort((a, b) => a - b);
-  const pMin = valid[Math.floor(valid.length * 0.02)] || 180, pMax = valid[Math.floor(valid.length * 0.98)] || 480;
+  // escala robusta: centrada en tu ritmo habitual de la carrera, sin que los arranques, paradas o
+  // tramos andando la aplasten (lo que se sale de la escala queda en el borde y se ve en el tooltip)
+  const q = (f) => valid[Math.min(valid.length - 1, Math.floor(valid.length * f))];
+  const med = q(0.5) || 330;
+  const pMin = Math.min(q(0.01) || med, med * 0.92) - 5;
+  const pMax = Math.max(Math.min(q(0.97) || med, med * 1.45), med * 1.08) + 5;
   const grids = [{ top: 10, height: "28%" }, { top: "38%", height: "28%" }, { top: "72%", height: "20%" }].map((g) => ({ left: 54, right: 14, ...g }));
   const xa = (i, show) => ({ type: "category", data: x, gridIndex: i, boundaryGap: false, axisLabel: { show, formatter: (v) => nf1.format(v) + " km", interval: Math.floor(x.length / 8) }, splitLine: { show: false } });
   chart(el, {
@@ -937,7 +943,8 @@ function streamsChart(el, s) {
     tooltip: { formatter: (ps) => `${nf1.format(ps[0].axisValue)} km<br>` + ps.map((p) => `${p.marker}${p.seriesName}: <b>${p.seriesName === "FC" ? p.value + " ppm" : p.seriesName === "Altitud" ? nf0.format(p.value) + " m" : pace(p.value) + " /km"}</b>`).join("<br>") },
     xAxis: [xa(0, false), xa(1, false), xa(2, true)],
     yAxis: [
-      { type: "value", gridIndex: 0, inverse: true, min: Math.floor(pMin / 15) * 15, max: Math.ceil(pMax / 15) * 15, axisLabel: { formatter: (v) => pace(v) } },
+      { type: "value", gridIndex: 0, inverse: true, min: Math.floor(pMin / 15) * 15, max: Math.ceil(pMax / 15) * 15, splitNumber: 4,
+        axisLabel: { formatter: (v) => pace(v), showMinLabel: false, showMaxLabel: false } },
       { type: "value", gridIndex: 1, scale: true },
       { type: "value", gridIndex: 2, scale: true },
     ],
