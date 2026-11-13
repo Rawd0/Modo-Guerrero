@@ -23,15 +23,12 @@ Mejoras previstas para próximas versiones, en el orden en que pensamos abordarl
   ritmo cumplido en las sesiones del plan e inicio con cuadrícula libre (calendario, sueño y rendimiento).
 - **0.10.0** Rutas repetidas con tu evolución en cada una y Strava como fuente complementaria
   (kudos, logros, segmentos con historial e importación de las carreras que sólo estén en Strava).
+- **0.11.0** HTTPS con Tailscale, entrar con Face ID (llaves de acceso) y notificaciones push.
 
 ## Más adelante
 
-- **HTTPS con Tailscale**, que desbloquea **Face ID con passkeys**, **notificaciones push** en el
-  móvil (zapatillas, sesión de Garmin caducada, resumen semanal) y el modo sin conexión de la app.
 - **Importar las zapatillas de Garmin Connect** (el «equipo» que ya tengas dado de alta allí) y su
   asignación a cada actividad.
-- **Face ID con passkeys** (requiere HTTPS): iniciar sesión con Face ID / huella mediante WebAuthn,
-  con la contraseña como respaldo.
 - **Zonas e historial del atleta** (Elevate): FC máxima, de reposo y umbral con fecha, para que las
   carreras antiguas se analicen con los valores que tenías entonces.
 - **Strava como fuente única** para quien no use Garmin (salud y forma desde otras fuentes).

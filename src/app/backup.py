@@ -265,6 +265,11 @@ def scheduler_loop():
         except Exception as e:  # noqa: BLE001
             state["last_error"] = str(e)
             log.exception("Programador de copias")
+            try:
+                from . import push
+                push.backup_failed(str(e))
+            except Exception:  # noqa: BLE001
+                pass
         time.sleep(60)
 
 

@@ -7,7 +7,7 @@ from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, backup, compare, db, garmin_auth, metrics, plans, races, remote, routes, shoes, stats, strava, sync
+from . import auth, backup, compare, db, garmin_auth, metrics, passkeys, plans, push, races, remote, routes, shoes, stats, strava, sync
 from .config import APP_NAME, DEFAULT_SETTINGS, VERSION
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -20,6 +20,7 @@ async def lifespan(_app):
     db.init()
     sync.start_scheduler()
     backup.start_scheduler()
+    push.start_scheduler()
     yield
 
 
@@ -61,9 +62,15 @@ async def session_auth(request: Request, call_next):
     return resp
 
 
+def _is_https(request: Request) -> bool:
+    # detrás de Tailscale y del proxy de Umbrel la conexión interna es HTTP: se mira de dónde viene el navegador
+    return (request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").startswith("https")
+            or request.headers.get("origin", "").startswith("https://"))
+
+
 def _set_cookie(request: Request, resp: Response, token: str, max_age):
     resp.set_cookie(auth.COOKIE, token, max_age=max_age, httponly=True, samesite="lax",
-                    secure=request.url.scheme == "https", path="/")
+                    secure=_is_https(request), path="/")
 
 
 def _start_session(request: Request, user_id: int, remember: bool) -> JSONResponse:
@@ -80,7 +87,7 @@ def auth_me(request: Request):
     u = request.state.user
     return {"setup_required": auth.user_count() == 0,
             "user": {"username": u["username"], "is_admin": u["is_admin"], "must_change": u["must_change"]} if u else None,
-            "version": VERSION}
+            "version": VERSION, "https_origins": passkeys.allowed_origins()}
 
 
 @app.post("/api/auth/setup")
@@ -99,6 +106,128 @@ def auth_login(request: Request, payload: dict = Body(...)):
     except auth.AuthFailed as e:
         raise HTTPException(401, str(e))
     return _start_session(request, u["id"], bool(payload.get("remember", False)))
+
+
+# ---------- Face ID / llaves de acceso ----------
+def _origin(request: Request) -> str:
+    # la cabecera Origin la pone el navegador (una página no puede falsearla)
+    o = request.headers.get("origin")
+    if not o:
+        raise HTTPException(400, "El navegador no indicó el origen de la petición")
+    return o
+
+
+def _pk(fn, *a):
+    try:
+        return fn(*a)
+    except passkeys.PasskeyError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/auth/passkey/options")
+def passkey_login_options(request: Request):
+    return _pk(passkeys.login_options, _origin(request))
+
+
+@app.post("/api/auth/passkey/login")
+def passkey_login(request: Request, payload: dict = Body(...)):
+    ip = _client_ip(request)
+    if auth._locked(f"ip:{ip}"):
+        raise HTTPException(401, "Demasiados intentos fallidos. Espera unos minutos.")
+    try:
+        uid = passkeys.login(payload.get("flow"), payload.get("credential") or {}, _origin(request))
+    except passkeys.PasskeyError as e:
+        auth._fail(f"ip:{ip}")
+        raise HTTPException(401, str(e))
+    return _start_session(request, uid, bool(payload.get("remember", True)))
+
+
+@app.get("/api/account/passkeys")
+def account_passkeys(request: Request):
+    return passkeys.list_for(request.state.user["id"])
+
+
+@app.post("/api/account/passkeys/options")
+def account_passkey_options(request: Request):
+    return _pk(passkeys.registration_options, request.state.user, _origin(request))
+
+
+@app.post("/api/account/passkeys")
+def account_passkey_add(request: Request, payload: dict = Body(...)):
+    return _pk(passkeys.register, request.state.user, payload.get("flow"), payload.get("credential") or {},
+               payload.get("name", ""), _origin(request))
+
+
+@app.put("/api/account/passkeys/{cid}")
+def account_passkey_rename(request: Request, cid: str, payload: dict = Body(...)):
+    _pk(passkeys.rename, request.state.user["id"], cid, payload.get("name", ""))
+    return {"ok": True}
+
+
+@app.delete("/api/account/passkeys/{cid}")
+def account_passkey_delete(request: Request, cid: str):
+    passkeys.delete(request.state.user["id"], cid)
+    return {"ok": True}
+
+
+@app.get("/api/admin/https")
+def admin_https():
+    return {"origins": passkeys.allowed_origins()}
+
+
+@app.post("/api/admin/https")
+def admin_https_add(payload: dict = Body(...)):
+    return {"origins": _pk(passkeys.add_origin, payload.get("origin", ""))}
+
+
+@app.delete("/api/admin/https")
+def admin_https_remove(origin: str):
+    return {"origins": passkeys.remove_origin(origin)}
+
+
+# ---------- notificaciones ----------
+def _ps(fn, *a):
+    try:
+        return fn(*a)
+    except push.PushError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/push")
+def push_info(request: Request):
+    uid = request.state.user["id"]
+    return {"public_key": push.public_key(), "prefs": push.prefs(uid), "devices": push.devices(uid)}
+
+
+@app.put("/api/push/prefs")
+def push_prefs(request: Request, payload: dict = Body(...)):
+    return _ps(push.save_prefs, request.state.user["id"], payload)
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(request: Request, payload: dict = Body(...)):
+    uid = request.state.user["id"]
+    _ps(push.subscribe, uid, payload.get("subscription") or {}, request.headers.get("user-agent", ""))
+    if payload.get("tz"):
+        try:
+            push.save_prefs(uid, {"tz": payload["tz"]})
+        except push.PushError:
+            pass
+    return {"ok": True}
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(request: Request, payload: dict = Body(...)):
+    push.unsubscribe(request.state.user["id"], payload.get("endpoint", ""))
+    return {"ok": True}
+
+
+@app.post("/api/push/test")
+def push_test(request: Request):
+    n = push.send(request.state.user["id"], "Modo Guerrero", "¡Las notificaciones funcionan! 💪", "/#/ajustes", "test")
+    if not n:
+        raise HTTPException(400, "No se pudo entregar a ningún dispositivo (activa las notificaciones en este primero)")
+    return {"ok": True, "devices": n}
 
 
 @app.post("/api/auth/logout")
@@ -759,6 +888,14 @@ async def upload(request: Request, files: list[UploadFile] = File(...)):
 
 # ---------- frontend ----------
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.get("/sw.js")
+def service_worker():
+    # en la raíz para que su alcance sea toda la app; sin caché para que se actualice al publicar
+    js = (STATIC / "sw.js").read_text(encoding="utf-8").replace("__VERSION__", VERSION)
+    return Response(js, media_type="application/javascript",
+                    headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
 
 @app.get("/{path:path}")

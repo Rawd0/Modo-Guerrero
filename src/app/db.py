@@ -15,7 +15,7 @@ from .config import DB_PATH, DEFAULT_SETTINGS
 
 log = logging.getLogger("guerrero.db")
 _lock = threading.RLock()
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -167,6 +167,21 @@ CREATE TABLE IF NOT EXISTS strava_efforts (
 );
 CREATE INDEX IF NOT EXISTS ix_seff_seg ON strava_efforts(user_id, segment_id);
 CREATE INDEX IF NOT EXISTS ix_seff_act ON strava_efforts(activity_id);
+CREATE TABLE IF NOT EXISTS passkeys (
+    credential_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    public_key TEXT NOT NULL,
+    sign_count INTEGER DEFAULT 0,
+    transports TEXT, name TEXT, rp_id TEXT,
+    created TEXT, last_used TEXT, backed_up INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_passkeys_user ON passkeys(user_id);
+CREATE TABLE IF NOT EXISTS push_subs (
+    endpoint TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    p256dh TEXT NOT NULL, auth TEXT NOT NULL,
+    user_agent TEXT, created TEXT, last_ok TEXT, fails INTEGER DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS daily_health (
     user_id INTEGER NOT NULL DEFAULT 0,
     date TEXT NOT NULL,
@@ -216,7 +231,8 @@ CREATE INDEX IF NOT EXISTS ix_sync_user ON sync_log(user_id, id);
 
 # tablas con datos de cada usuario (best_efforts y streams cuelgan de activities)
 USER_TABLES = ("activities", "daily_health", "snapshots", "sync_log", "user_settings", "shoes", "races",
-               "training_plans", "plan_sessions", "routes", "route_sigs", "strava_activities", "strava_efforts")
+               "training_plans", "plan_sessions", "routes", "route_sigs", "strava_activities", "strava_efforts",
+               "passkeys", "push_subs")
 
 
 def connect():

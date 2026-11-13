@@ -1725,7 +1725,8 @@ route("ajustes", async (view) => {
   const [st, set, log, sessions, users] = await Promise.all([api("/api/status"), api("/api/settings"), api("/api/sync/log"),
     api("/api/account/sessions"), ME && ME.is_admin ? api("/api/admin/users") : Promise.resolve(null)]);
   const [bk, rm] = ME && ME.is_admin ? await Promise.all([api("/api/admin/backups"), api("/api/admin/remote")]) : [null, null];
-  const sv = await api("/api/strava");
+  const [sv, pk, pu, adminHttps] = await Promise.all([api("/api/strava"), api("/api/account/passkeys"), api("/api/push"),
+    ME && ME.is_admin ? api("/api/admin/https") : Promise.resolve(null)]);
   const svMsg = HASH_QUERY.get("strava");
   view.innerHTML = `
     <div class="page-head"><div><h1>Ajustes</h1><div class="sub">Modo Guerrero v${esc(st.version)}</div></div></div>
@@ -1834,6 +1835,7 @@ route("ajustes", async (view) => {
         <div class="faint" style="font-size:12px;margin-top:6px">Pásale el usuario y la contraseña temporal. Al entrar por primera vez tendrá que elegir la suya y conectar su propia cuenta de Garmin.</div>
         <div id="nuMsg" style="margin-top:8px"></div>
       </div>` : ""}
+      ${secureCard(pk, pu, adminHttps)}
       ${bk ? backupCard(bk) : ""}
       ${rm ? remoteCard(rm) : ""}
       <div class="card wide" style="grid-column:1/-1"><h3>Historial de sincronizaciones</h3>
@@ -1847,6 +1849,7 @@ route("ajustes", async (view) => {
   if (bk) setupBackups(bk);
   if (rm) setupRemote(rm);
   setupStrava(sv);
+  setupSecure(pu);
   if (svMsg) history.replaceState(null, "", "#/ajustes");
   const saveAppearance = async (theme, accent) => {
     applyTheme(theme, accent);
@@ -2267,10 +2270,17 @@ function showAuth(setup) {
                    <div class="faint" style="font-size:12px">Mínimo 10 caracteres. Una frase de varias palabras es fácil de recordar y difícil de adivinar.</div>` : ""}
         <label class="check"><input type="checkbox" id="ar" checked> Recordar este dispositivo (90 días)</label>
         <button class="btn primary" id="ab" style="justify-content:center">${setup ? "Crear cuenta y entrar" : "Entrar"}</button>
+        ${!setup && passkeyReady() ? `<button type="button" class="btn" id="apk" style="justify-content:center">Entrar con ${BIO}</button>` : ""}
         <div id="amsg"></div>
       </form>
     </div></div>`;
-  $("#au").focus();
+  if (!IS_IOS) $("#au").focus();
+  const pkb = $("#apk");
+  if (pkb) pkb.onclick = async () => {
+    const msg = $("#amsg"); msg.innerHTML = ""; pkb.disabled = true;
+    try { const r = await passkeyLogin($("#ar").checked); ME = r.user; if (ME.must_change) showForcedChange(); else enterApp(); }
+    catch (e) { msg.innerHTML = `<p class="tag bad" style="white-space:normal">${esc(passkeyErr(e))}</p>`; pkb.disabled = false; }
+  };
   $("#af").onsubmit = async (e) => {
     e.preventDefault();
     const msg = $("#amsg"), b = $("#ab");
@@ -2348,11 +2358,149 @@ document.addEventListener("visibilitychange", () => {
   hiddenAt = 0;
 });
 
+// ---------------------------------------------------------------- Face ID (llaves de acceso)
+let HTTPS_ORIGINS = [];
+const b64uToBuf = (s) => { s = s.replace(/-/g, "+").replace(/_/g, "/"); const bin = atob(s + "===".slice((s.length + 3) % 4)); return Uint8Array.from(bin, (c) => c.charCodeAt(0)).buffer; };
+const bufToB64u = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const PASSKEY_SUPPORTED = !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext);
+const passkeyReady = () => PASSKEY_SUPPORTED && HTTPS_ORIGINS.includes(location.origin);
+const BIO = IS_IOS ? "Face ID" : /Mac/.test(navigator.userAgent) ? "Touch ID" : "huella o Windows Hello";
+function credToJSON(c) {
+  const r = c.response, out = { id: c.id, rawId: bufToB64u(c.rawId), type: c.type, clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {}, response: {} };
+  if (c.authenticatorAttachment) out.authenticatorAttachment = c.authenticatorAttachment;
+  out.response.clientDataJSON = bufToB64u(r.clientDataJSON);
+  if (r.attestationObject) { out.response.attestationObject = bufToB64u(r.attestationObject); out.response.transports = r.getTransports ? r.getTransports() : []; }
+  if (r.authenticatorData) { out.response.authenticatorData = bufToB64u(r.authenticatorData); out.response.signature = bufToB64u(r.signature); out.response.userHandle = r.userHandle ? bufToB64u(r.userHandle) : null; }
+  return out;
+}
+async function passkeyLogin(remember) {
+  const { flow, options: o } = await api("/api/auth/passkey/options", { method: "POST" });
+  const cred = await navigator.credentials.get({ publicKey: { ...o, challenge: b64uToBuf(o.challenge),
+    allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64uToBuf(c.id) })) } });
+  return api("/api/auth/passkey/login", { method: "POST", body: { flow, credential: credToJSON(cred), remember } });
+}
+async function passkeyRegister(name) {
+  const { flow, options: o } = await api("/api/account/passkeys/options", { method: "POST" });
+  const cred = await navigator.credentials.create({ publicKey: { ...o, challenge: b64uToBuf(o.challenge),
+    user: { ...o.user, id: b64uToBuf(o.user.id) }, excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64uToBuf(c.id) })) } });
+  return api("/api/account/passkeys", { method: "POST", body: { flow, credential: credToJSON(cred), name } });
+}
+const passkeyErr = (e) => (e && e.name === "NotAllowedError" ? "Cancelado (o se agotó el tiempo)" : e && e.name === "InvalidStateError" ? "Este dispositivo ya tiene una llave registrada" : (e && e.message) || "Error");
+
+// ---------------------------------------------------------------- notificaciones
+const PUSH_SUPPORTED = "serviceWorker" in navigator && "PushManager" in window && window.isSecureContext;
+async function pushSubscription() {
+  if (!PUSH_SUPPORTED) return null;
+  const reg = await navigator.serviceWorker.getRegistration("/");
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+async function pushEnable(publicKey) {
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") throw new Error("No has dado permiso para las notificaciones (puedes activarlo en los ajustes del sistema)");
+  const reg = await navigator.serviceWorker.register("/sw.js");
+  await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64uToBuf(publicKey) });
+  await api("/api/push/subscribe", { method: "POST", body: { subscription: sub.toJSON(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone } });
+}
+async function pushDisable() {
+  const sub = await pushSubscription();
+  if (sub) { await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: sub.endpoint } }); await sub.unsubscribe(); }
+}
+
+function secureCard(pk, pu, adminHttps) {
+  const isHttps = location.protocol === "https:", allowed = HTTPS_ORIGINS.includes(location.origin);
+  const host = location.hostname, isIp = /^[\d.]+$/.test(host) || host.includes(":");
+  const tsGuide = `<details style="margin-top:8px" ${isHttps ? "" : "open"}><summary class="muted" style="cursor:pointer;font-size:13px">Cómo activar HTTPS con Tailscale (una vez, unos 5 minutos)</summary>
+    <ol class="muted" style="font-size:13px;line-height:1.65">
+      <li>En el panel de Tailscale (<b>login.tailscale.com › DNS</b>) activa <b>MagicDNS</b> y, más abajo, <b>HTTPS Certificates</b>.</li>
+      <li>En Umbrel abre <b>Ajustes › Avanzado › Terminal › umbrelOS</b> y pega:<br>
+        <code class="cmd">sudo docker exec $(sudo docker ps -qf name=tailscale | head -1) tailscale serve --bg http://127.0.0.1:8095</code><br>
+        Te mostrará la dirección, del tipo <code>https://umbrel.tu-red.ts.net</code> (la primera vez tarda un minuto en conseguir el certificado). Puedes comprobarla con el mismo comando cambiando <code>serve --bg http://127.0.0.1:8095</code> por <code>serve status</code>.</li>
+      <li>Abre esa dirección en el iPhone (con Tailscale activo), entra con tu usuario y, si eres administrador, pulsa aquí <b>Autorizar esta dirección</b>.</li>
+      <li>Añade la app a la pantalla de inicio <b>desde esa dirección</b> (y borra el icono antiguo). Ya puedes activar ${BIO} y las notificaciones.</li>
+    </ol>
+    <p class="faint" style="font-size:12px">El certificado es de Let's Encrypt y lo renueva Tailscale solo. La dirección sólo funciona dentro de tu red de Tailscale: no queda expuesta a internet. Si ya usas <code>tailscale serve</code> para otra app en el puerto 443, añade <code>--https=8443</code> antes de <code>http://</code> y la dirección acabará en <code>:8443</code>.</p></details>`;
+  const conn = isHttps && allowed ? `<p class="tag good" style="white-space:normal">Conexión segura por HTTPS: ${esc(location.origin)}</p>`
+    : isHttps ? `<p class="tag warn" style="white-space:normal">Estás en HTTPS (${esc(location.origin)}), pero esta dirección aún no está autorizada para ${BIO}.</p>
+        ${isIp ? `<p class="muted" style="font-size:13px">${BIO} necesita un nombre de dominio, no una IP: usa la dirección .ts.net.</p>` : ME.is_admin ? `<button class="btn primary small" id="httpsAllow">Autorizar esta dirección</button>` : `<p class="muted" style="font-size:13px">Pide a un administrador que la autorice en Ajustes.</p>`}`
+    : `<p class="tag warn" style="white-space:normal">Estás entrando por HTTP (${esc(location.host)}). ${BIO} y las notificaciones necesitan HTTPS.</p>
+        ${HTTPS_ORIGINS.length ? `<p style="font-size:13px">Abre la app por <a href="${esc(HTTPS_ORIGINS[0])}">${esc(HTTPS_ORIGINS[0])}</a>.</p>` : ""}`;
+  const origins = adminHttps ? `<div class="rec-list" style="margin-top:8px">${adminHttps.origins.map((o) => `<div class="rec-row" style="grid-template-columns:1fr auto"><span class="num" style="font-size:13px">${esc(o)}</span><button class="btn small ghost" data-rmorigin="${esc(o)}">Quitar</button></div>`).join("") || `<div class="faint" style="font-size:12px">Ninguna dirección HTTPS autorizada todavía.</div>`}</div>` : "";
+  // Face ID
+  const pkList = pk.map((k) => `<div class="rec-row" style="grid-template-columns:1fr auto"><span>${esc(k.name)}${k.backed_up ? ` <span class="faint" title="Sincronizada con el llavero de iCloud u otro gestor">☁︎</span>` : ""}<br>
+      <span class="faint" style="font-size:12px">${esc(k.rp_id)} · creada ${fdateShort(k.created.slice(0, 10))}${k.last_used ? ` · último uso ${esc(timeAgo(k.last_used))}` : ""}</span></span>
+      <button class="btn small ghost" data-rmpk="${esc(k.id)}">Quitar</button></div>`).join("");
+  const pkSec = `<h3 style="margin-top:18px">Entrar con ${BIO}</h3>
+    ${pkList ? `<div class="rec-list">${pkList}</div>` : `<p class="muted" style="font-size:13px;margin-top:0">Entra sin contraseña con ${BIO}. La llave se guarda en tu dispositivo (y en el llavero de iCloud si lo usas): el servidor sólo guarda la parte pública.</p>`}
+    ${passkeyReady() ? `<div class="row" style="margin-top:10px"><button class="btn primary" id="pkAdd">Añadir ${BIO} en este dispositivo</button></div>` : !PASSKEY_SUPPORTED && isHttps ? `<p class="faint" style="font-size:12px">Este navegador no admite llaves de acceso.</p>` : ""}`;
+  // notificaciones
+  const needInstall = IS_IOS && !IS_STANDALONE;
+  const p = pu ? pu.prefs : null;
+  const pushSec = `<h3 style="margin-top:18px">Notificaciones</h3>
+    ${!isHttps ? `<p class="muted" style="font-size:13px;margin-top:0">Disponibles al abrir la app por HTTPS.</p>`
+      : needInstall ? `<p class="muted" style="font-size:13px;margin-top:0">En el iPhone, las notificaciones sólo funcionan con la app <b>añadida a la pantalla de inicio</b> (desde esta dirección HTTPS) y abierta desde su icono.</p>`
+      : !PUSH_SUPPORTED ? `<p class="muted" style="font-size:13px;margin-top:0">Este navegador no admite notificaciones.</p>`
+      : `<div id="pushState" class="muted" style="font-size:13px">Comprobando…</div>
+        <div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn primary" id="pushOn" hidden>Activar en este dispositivo</button><button class="btn" id="pushTest" hidden>Enviar una de prueba</button><button class="btn ghost" id="pushOff" hidden>Desactivar aquí</button></div>`}
+    ${p ? `<div id="pushPrefs" style="margin-top:12px">
+      <label class="check"><input type="checkbox" data-np="daily" ${p.daily ? "checked" : ""}> «Hoy toca»: la sesión del plan del día</label>
+      <label class="check"><input type="checkbox" data-np="weekly" ${p.weekly ? "checked" : ""}> Resumen de la semana (los lunes)</label>
+      <label class="check"><input type="checkbox" data-np="records" ${p.records ? "checked" : ""}> Récords personales nuevos</label>
+      <label class="check"><input type="checkbox" data-np="shoes" ${p.shoes ? "checked" : ""}> Zapatillas cerca del final</label>
+      <label class="check"><input type="checkbox" data-np="problems" ${p.problems ? "checked" : ""}> Problemas: sesión de Garmin o Strava caducada${ME.is_admin ? ", copias que fallan" : ""}</label>
+      <label class="field" style="max-width:200px;margin-top:8px">Hora de los avisos diarios<input type="time" id="npTime" value="${esc(p.time)}"></label>
+      <div class="faint" style="font-size:12px">Zona horaria: ${esc(p.tz)} · ${pu.devices.length} ${pu.devices.length === 1 ? "dispositivo" : "dispositivos"} con avisos activos</div>
+    </div>` : ""}`;
+  return `<div class="card wide" style="grid-column:1/-1" id="secCard"><h3>HTTPS, ${BIO} y notificaciones</h3>
+    ${conn}${ME.is_admin ? origins : ""}${tsGuide}${pkSec}${pushSec}</div>`;
+}
+
+async function setupSecure(pu) {
+  const allow = $("#httpsAllow");
+  if (allow) allow.onclick = async () => {
+    try { const r = await api("/api/admin/https", { method: "POST", body: { origin: location.origin } }); HTTPS_ORIGINS = r.origins; toast("Dirección autorizada"); rerender(); }
+    catch (e) { toast(e.message, true); }
+  };
+  $$("[data-rmorigin]").forEach((b) => (b.onclick = async () => {
+    if (!confirm(`¿Quitar ${b.dataset.rmorigin}? Las llaves de ${BIO} creadas para ella dejarán de servir.`)) return;
+    const r = await api(`/api/admin/https?origin=${encodeURIComponent(b.dataset.rmorigin)}`, { method: "DELETE" }); HTTPS_ORIGINS = r.origins; rerender();
+  }));
+  const add = $("#pkAdd");
+  if (add) add.onclick = async () => {
+    try { await passkeyRegister(deviceName(navigator.userAgent)); toast(`${BIO} activado en este dispositivo`); rerender(); }
+    catch (e) { toast(passkeyErr(e), true); }
+  };
+  $$("[data-rmpk]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("¿Quitar esta llave? Para volver a usarla tendrás que añadirla de nuevo (y borrarla también del llavero del dispositivo).")) return;
+    await api(`/api/account/passkeys/${encodeURIComponent(b.dataset.rmpk)}`, { method: "DELETE" }); rerender();
+  }));
+  if ($("#pushState")) {
+    const sub = await pushSubscription().catch(() => null);
+    const known = sub && pu.devices.some((d) => d.endpoint === sub.endpoint);
+    const perm = window.Notification ? Notification.permission : "default";
+    $("#pushState").innerHTML = known ? `<span class="tag good">Activadas en este dispositivo</span>`
+      : perm === "denied" ? `<span class="tag bad" style="white-space:normal">Bloqueadas: permítelas en los ajustes del sistema (en el iPhone: Ajustes › Notificaciones › Modo Guerrero)</span>`
+      : "Desactivadas en este dispositivo.";
+    $("#pushOn").hidden = !!known || perm === "denied";
+    $("#pushTest").hidden = !pu.devices.length;
+    $("#pushOff").hidden = !known;
+    $("#pushOn").onclick = async () => { try { await pushEnable(pu.public_key); toast("Notificaciones activadas"); rerender(); } catch (e) { toast(e.message, true); } };
+    $("#pushOff").onclick = async () => { await pushDisable(); toast("Desactivadas en este dispositivo"); rerender(); };
+    $("#pushTest").onclick = async () => { try { const r = await api("/api/push/test", { method: "POST" }); toast(`Enviada a ${r.devices} ${r.devices === 1 ? "dispositivo" : "dispositivos"}`); } catch (e) { toast(e.message, true); } };
+  }
+  const savePrefs = (body) => api("/api/push/prefs", { method: "PUT", body }).then(() => toast("Guardado")).catch((e) => toast(e.message, true));
+  $$("[data-np]").forEach((c) => (c.onchange = () => savePrefs({ [c.dataset.np]: c.checked })));
+  if ($("#npTime")) $("#npTime").onchange = (e) => savePrefs({ time: e.target.value });
+}
+
 // ---------------------------------------------------------------- arranque
 (async () => {
   try {
     const me = await api("/api/auth/me");
+    HTTPS_ORIGINS = me.https_origins || [];
     $("#version").textContent = "v" + me.version;
+    if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
     if (me.user) { ME = me.user; if (ME.must_change) showForcedChange(); else enterApp(); }
     else showAuth(me.setup_required);
   } catch (e) {

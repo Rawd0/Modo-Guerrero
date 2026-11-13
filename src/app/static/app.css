@@ -391,3 +391,4 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .route-svg { width: 96px; height: 96px; background: var(--card-2); border-radius: 12px; }
 tr.best-row td { background: color-mix(in srgb, var(--good) 10%, transparent); }
 @media (max-width: 1440px) and (min-width: 761px) { nav a { padding: 7px 9px; font-size: 14.5px; } .topbar { gap: 12px; } }
+code.cmd { display: block; margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--card-2); font-size: 12px; word-break: break-all; user-select: all; color: var(--text); }

@@ -395,6 +395,10 @@ def after_backup(info: dict):
     def run():
         try:
             upload(info["name"])
-        except RemoteError:
-            pass  # queda registrado en «last»
+        except RemoteError as e:  # queda registrado en «last»; se avisa a los administradores
+            try:
+                from . import push
+                push.backup_failed(f"No se pudo subir la copia fuera del servidor: {e}")
+            except Exception:  # noqa: BLE001
+                pass
     threading.Thread(target=run, daemon=True, name="remote-upload").start()

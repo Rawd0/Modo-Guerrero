@@ -332,6 +332,11 @@ def run_sync(uid: int):
                 state["last_error"] = msg
             db.execute("UPDATE sync_log SET finished=?, status=?, message=? WHERE id=?",
                        (state["last_end"], status, msg, log_id))
+        try:
+            from . import push
+            push.after_sync(uid, status, msg)
+        except Exception:  # noqa: BLE001
+            log.exception("Avisos tras sincronizar")
         # pausa entre usuarios para no encadenar peticiones a Garmin
         time.sleep(GARMIN_PAUSE * 5)
 
