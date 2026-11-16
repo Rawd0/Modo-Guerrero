@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Diagnóstico · Modo Guerrero</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f3f5f8; --card: #fff; --text: #1b2230; --muted: #667085; --ok: #12a150; --bad: #e5484d; --warn: #c27c0e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f1216; --card: #1a1f27; --text: #e7ebf0; --muted: #8b96a5; } }
+  body { margin: 0; font: 15px/1.45 -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text);
+         padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 24px); }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .card { background: var(--card); border-radius: 14px; padding: 6px 16px; margin: 14px 0; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--muted) 20%, transparent); }
+  .row:last-child { border-bottom: 0; }
+  .row small { display: block; color: var(--muted); word-break: break-all; }
+  .ok { color: var(--ok); font-weight: 650; } .bad { color: var(--bad); font-weight: 650; } .warn { color: var(--warn); font-weight: 650; }
+  button, a.btn { font: inherit; padding: 9px 14px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
+         background: var(--card); color: var(--text); text-decoration: none; display: inline-block; margin: 4px 6px 4px 0; }
+  pre { white-space: pre-wrap; font-size: 12px; background: var(--card); padding: 12px; border-radius: 12px; user-select: all; }
+  p.muted { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Diagnóstico de la conexión</h1>
+  <p class="muted">Comprueba, paso a paso, que este dispositivo llega a Modo Guerrero y puede descargar la app. Si algo sale en rojo, haz una captura (o copia el informe de abajo).</p>
+  <div class="card" id="out"></div>
+  <div>
+    <button onclick="run()">Repetir</button>
+    <button id="swbtn" onclick="clearSW()" hidden>Quitar el service worker</button>
+    <a class="btn" href="/">Volver a la app</a>
+  </div>
+  <p class="muted">Informe (para copiar):</p>
+  <pre id="report"></pre>
+</main>
+<script>
+var out = document.getElementById("out"), lines = [];
+function row(name, state, detail) {
+  var cls = state === true ? "ok" : state === false ? "bad" : "warn";
+  var label = state === true ? "Bien" : state === false ? "Falla" : state || "";
+  out.insertAdjacentHTML("beforeend", '<div class="row"><div>' + name + (detail ? "<small>" + String(detail).replace(/[<>&]/g, "") + "</small>" : "") +
+    '</div><div class="' + cls + '">' + label + "</div></div>");
+  lines.push((state === true ? "OK   " : state === false ? "FALLO" : "AVISO") + "  " + name + (detail ? " — " + detail : ""));
+  document.getElementById("report").textContent = lines.join("\n");
+}
+function timed(url, opts, ms) {
+  var ctrl = window.AbortController ? new AbortController() : null;
+  var t0 = performance.now(), timer = ctrl && setTimeout(function () { ctrl.abort(); }, ms || 20000);
+  return fetch(url, Object.assign({ cache: "no-store", credentials: "same-origin", signal: ctrl && ctrl.signal }, opts || {}))
+    .then(function (r) { return r.arrayBuffer().then(function (b) { clearTimeout(timer); return { r: r, size: b.byteLength, ms: Math.round(performance.now() - t0), body: b }; }); })
+    .catch(function (e) { clearTimeout(timer); throw new Error(e.name === "AbortError" ? "sin respuesta en " + Math.round((ms || 20000) / 1000) + " s" : e.message); });
+}
+async function run() {
+  out.innerHTML = ""; lines = [];
+  lines.push("Modo Guerrero · diagnóstico " + new Date().toISOString());
+  row("Dirección", null, location.origin);
+  row("Conexión segura (HTTPS)", window.isSecureContext ? true : "No", window.isSecureContext ? "" : "Sin HTTPS no hay Face ID ni notificaciones; la app funciona igual");
+  row("Navegador", null, navigator.userAgent);
+  var standalone = window.navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+  row("Abierta como app de la pantalla de inicio", null, standalone ? "Sí" : "No");
+  try {
+    var p = await timed("/api/ping", {}, 15000);
+    var j = JSON.parse(new TextDecoder().decode(p.body));
+    row("El servidor responde", p.r.ok, "v" + j.version + " · " + p.ms + " ms");
+  } catch (e) { row("El servidor responde", false, e.message); }
+  try {
+    var m = await timed("/api/auth/me", {}, 15000);
+    var mj = JSON.parse(new TextDecoder().decode(m.body));
+    row("Sesión", mj.user ? true : "Sin iniciar", (mj.user ? "Usuario " + mj.user.username : "Tendrás que iniciar sesión") + " · " + m.ms + " ms");
+  } catch (e) { row("Sesión", false, e.message); }
+  var files = ["/static/app.js", "/static/app.css", "/static/vendor/echarts.min.js", "/static/vendor/leaflet.js"];
+  for (var i = 0; i < files.length; i++) {
+    try {
+      var f = await timed(files[i] + "?diag=" + Date.now(), {}, 30000);
+      var kb = Math.round(f.size / 1024), enc = f.r.headers.get("content-encoding") || "sin comprimir";
+      var speed = f.ms ? Math.round(f.size / 1024 / (f.ms / 1000)) : 0;
+      row("Descarga " + files[i].split("/").pop(), f.r.ok ? (f.ms > 8000 ? "Lenta" : true) : false, f.r.status + " · " + kb + " KB en " + f.ms + " ms (" + speed + " KB/s, " + enc + ")");
+    } catch (e) { row("Descarga " + files[i].split("/").pop(), false, e.message); }
+  }
+  try { localStorage.setItem("mg_diag", "1"); localStorage.removeItem("mg_diag"); row("Almacenamiento local", true); }
+  catch (e) { row("Almacenamiento local", "No disponible", e.message); }
+  row("Cookies", navigator.cookieEnabled ? true : false);
+  if ("serviceWorker" in navigator) {
+    try {
+      var regs = await navigator.serviceWorker.getRegistrations();
+      row("Service worker (notificaciones)", null, regs.length ? regs.length + " registrado(s): " + regs.map(function (r) { return r.scope; }).join(", ") : "ninguno");
+      document.getElementById("swbtn").hidden = !regs.length;
+    } catch (e) { row("Service worker", null, e.message); }
+  }
+}
+async function clearSW() {
+  var regs = await navigator.serviceWorker.getRegistrations();
+  for (var i = 0; i < regs.length; i++) await regs[i].unregister();
+  alert("Quitado. Al volver a activar las notificaciones se registrará de nuevo.");
+  run();
+}
+run();
+</script>
+</body>
+</html>

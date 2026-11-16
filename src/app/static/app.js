@@ -2508,9 +2508,11 @@ async function setupSecure(pu) {
     HTTPS_ORIGINS = me.https_origins || [];
     $("#version").textContent = "v" + me.version;
     if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
+    window.__mgStarted = true;
     if (me.user) { ME = me.user; if (ME.must_change) showForcedChange(); else enterApp(); }
     else showAuth(me.setup_required);
   } catch (e) {
-    $("#view").innerHTML = `<div class="empty"><h2>No se puede conectar con la app</h2><p>${esc(e.message)}</p></div>`;
+    window.__mgStarted = true;
+    $("#view").innerHTML = `<div class="empty"><h2>No se puede conectar con la app</h2><p>${esc(e.message)}</p><p><a href="/diag">Diagnóstico de la conexión</a></p></div>`;
   }
 })();

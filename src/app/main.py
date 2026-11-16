@@ -1,8 +1,11 @@
 """API web de Modo Guerrero."""
 import logging
+from datetime import datetime
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi import Body, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -30,7 +33,7 @@ app = FastAPI(title=APP_NAME, version=VERSION, docs_url=None, redoc_url=None, li
 # ---------- autenticación ----------
 CSRF_HEADER = "x-requested-with"
 CSRF_VALUE = "modo-guerrero"
-PUBLIC_API = ("/api/auth/",)
+PUBLIC_API = ("/api/auth/", "/api/ping")
 
 
 def _client_ip(request: Request) -> str:
@@ -44,7 +47,9 @@ async def session_auth(request: Request, call_next):
         # Protección CSRF: un formulario de otra web no puede añadir esta cabecera
         if request.method not in ("GET", "HEAD", "OPTIONS") and request.headers.get(CSRF_HEADER) != CSRF_VALUE:
             return JSONResponse({"detail": "Petición no permitida"}, status_code=403)
-        user = auth.session_user(request.cookies.get(auth.COOKIE))
+        # en un hilo aparte: si la base de datos está ocupada (sincronización, copia…) no se bloquea
+        # el servidor entero y los archivos de la app se siguen sirviendo
+        user = await run_in_threadpool(auth.session_user, request.cookies.get(auth.COOKIE))
         request.state.user = user
         if not user and not path.startswith(PUBLIC_API):
             return JSONResponse({"detail": "Inicia sesión", "auth": True}, status_code=401)
@@ -59,7 +64,14 @@ async def session_auth(request: Request, call_next):
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     if path.startswith("/api/"):
         resp.headers["Cache-Control"] = "no-store"
+    elif path.startswith("/static/") and request.url.query.startswith("v="):
+        # archivos con versión en la dirección: el móvil los guarda y no los vuelve a pedir hasta la próxima versión
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return resp
+
+
+# comprimir las respuestas (la app y sus librerías pasan de ~1,4 MB a ~0,4 MB): clave con poca cobertura o por VPN
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 
 def _is_https(request: Request) -> bool:
@@ -888,6 +900,16 @@ async def upload(request: Request, files: list[UploadFile] = File(...)):
 
 # ---------- frontend ----------
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.get("/api/ping")
+def ping():
+    return {"ok": True, "version": VERSION, "time": datetime.now().isoformat(timespec="seconds")}
+
+
+@app.get("/diag")
+def diag_page():
+    return FileResponse(STATIC / "diag.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/sw.js")

@@ -24,7 +24,7 @@
       if (t.accent) document.documentElement.style.setProperty("--accent", t.accent);
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/static/vendor/leaflet.css">
+  <link rel="stylesheet" href="/static/vendor/leaflet.css?v=__VERSION__">
   <link rel="stylesheet" href="/static/app.css?v=__VERSION__">
 </head>
 <body>
@@ -53,9 +53,29 @@
   <main id="view"></main>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="/static/vendor/echarts.min.js"></script>
-  <script src="/static/vendor/leaflet.js"></script>
-  <script src="/static/vendor/Sortable.min.js"></script>
+  <script>
+    // si algo falla al arrancar, mostrarlo en vez de dejar la pantalla en blanco
+    (function () {
+      var shown = false;
+      function show(msg) {
+        if (shown || window.__mgStarted) return; shown = true;
+        var v = document.getElementById("view");
+        document.body.classList.remove("auth-screen");
+        v.innerHTML = '<div class="boot-error"><h2>La app no ha terminado de cargar</h2><p>' + String(msg).replace(/[<>&]/g, "") +
+          '</p><p><button onclick="location.reload()">Reintentar</button> <a href="/diag">Diagnóstico de la conexión</a></p></div>';
+      }
+      window.addEventListener("error", function (e) {
+        var t = e.target;
+        if (t && (t.src || t.href)) show("No se pudo descargar " + (t.src || t.href).split("?")[0].replace(location.origin, ""));
+        else show("Error: " + (e.message || e));
+      }, true);
+      window.addEventListener("unhandledrejection", function (e) { show("Error: " + ((e.reason && e.reason.message) || e.reason)); });
+      setTimeout(function () { show("Tarda demasiado en responder (más de 20 s). Puede ser la conexión (VPN, cobertura) o que el servidor esté ocupado."); }, 20000);
+    })();
+  </script>
+  <script src="/static/vendor/echarts.min.js?v=__VERSION__"></script>
+  <script src="/static/vendor/leaflet.js?v=__VERSION__"></script>
+  <script src="/static/vendor/Sortable.min.js?v=__VERSION__"></script>
   <script src="/static/app.js?v=__VERSION__"></script>
 </body>
 </html>
