@@ -394,3 +394,6 @@ tr.best-row td { background: color-mix(in srgb, var(--good) 10%, transparent); }
 code.cmd { display: block; margin: 6px 0; padding: 8px 10px; border-radius: 8px; background: var(--card-2); font-size: 12px; word-break: break-all; user-select: all; color: var(--text); }
 .boot-error { max-width: 520px; margin: 60px auto; padding: 0 20px; text-align: center; }
 .boot-error button { font: inherit; padding: 8px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.seg::-webkit-scrollbar { display: none; }
+.seg button { white-space: nowrap; flex-shrink: 0; }

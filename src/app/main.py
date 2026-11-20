@@ -749,7 +749,7 @@ def get_fitness(request: Request, days: int = 180):
     snaps = db.rows("SELECT date, vo2max FROM snapshots WHERE user_id=? AND vo2max IS NOT NULL ORDER BY date", (uid,))
     vo2 = db.rows("SELECT date, MAX(vo2max) vo2max FROM activities WHERE user_id=? AND vo2max IS NOT NULL "
                   "GROUP BY date ORDER BY date", (uid,))
-    return {"series": metrics.fitness_series(uid, min(max(days, 14), 3650)), "vo2": vo2 or snaps,
+    return {"series": metrics.fitness_series(uid, min(max(days, 7), 3650)), "vo2": vo2 or snaps,
             "snapshot": stats.latest_snapshot(uid),
             "monotony": metrics.monotony_strain(uid, weeks=max(8, min(days // 7, 104)))}
 

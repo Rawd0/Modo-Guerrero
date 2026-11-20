@@ -449,19 +449,23 @@ function wFitness(card, d) {
 
 function fitnessChart(el, f, full) {
   const t = theme();
+  // pocos días: puntos visibles, día de la semana en el eje y sin barra de zoom
+  const short = full && f.length <= 31, wk = f.length <= 14;
+  const sym = short ? "circle" : "none";
   return chart(el, {
-    grid: { left: 4, right: 4, top: full ? 34 : 6, bottom: full ? 30 : 2, containLabel: true },
+    grid: { left: 4, right: 4, top: full ? (el.clientWidth < 520 ? 64 : 34) : 6, bottom: full ? 30 : 2, containLabel: true },
     legend: full ? { top: 0, textStyle: { color: t.text }, icon: "roundRect" } : undefined,
-    xAxis: { type: "category", data: f.map((x) => x.date), axisLabel: { show: full, formatter: (v) => fdateShort(v) }, boundaryGap: false },
+    xAxis: { type: "category", data: f.map((x) => x.date), boundaryGap: short,
+      axisLabel: { show: full, formatter: (v) => (wk ? `${WEEKDAYS[new Date(v + "T12:00:00").getDay()]} ${new Date(v + "T12:00:00").getDate()}` : fdateShort(v)) } },
     yAxis: [{ type: "value", axisLabel: { show: full } }, { type: "value", show: false }],
-    dataZoom: full ? [{ type: "inside" }, { type: "slider", height: 18, bottom: 4, borderColor: t.line, textStyle: { color: t.text } }] : undefined,
+    dataZoom: full && !short ? [{ type: "inside" }, { type: "slider", height: 18, bottom: 4, borderColor: t.line, textStyle: { color: t.text } }] : undefined,
     tooltip: { formatter: (ps) => `${fdate(ps[0].axisValue)}<br>` + ps.map((p) => `${p.marker}${p.seriesName}: <b>${nf0.format(p.value)}</b>`).join("<br>") },
     series: [
-      { name: "Fitness (CTL)", type: "line", data: f.map((x) => x.ctl), smooth: true, symbol: "none", lineStyle: { width: 2.5, color: t.blue },
+      { name: "Fitness (CTL)", type: "line", data: f.map((x) => x.ctl), smooth: true, symbol: sym, symbolSize: 6, lineStyle: { width: 2.5, color: t.blue },
         areaStyle: { color: t.blue + "22" }, itemStyle: { color: t.blue } },
-      { name: "Fatiga (ATL)", type: "line", data: f.map((x) => x.atl), smooth: true, symbol: "none", lineStyle: { width: 1.5, color: t.violet }, itemStyle: { color: t.violet } },
+      { name: "Fatiga (ATL)", type: "line", data: f.map((x) => x.atl), smooth: true, symbol: sym, symbolSize: 6, lineStyle: { width: 1.5, color: t.violet }, itemStyle: { color: t.violet } },
       ...(!full ? [] : [{ name: "Forma (TSB)", type: "bar", yAxisIndex: 0, data: f.map((x) => ({ value: x.tsb, itemStyle: { color: x.tsb >= 0 ? t.good + "aa" : t.warn + "aa" } })), barCategoryGap: "20%", itemStyle: { color: t.good } }]),
-      ...(full ? [{ name: "Carga diaria", type: "scatter", data: f.map((x) => x.load || null), symbolSize: 5, itemStyle: { color: t.accent }, yAxisIndex: 0 }] : []),
+      ...(full ? [{ name: "Carga diaria", type: "scatter", data: f.map((x) => x.load || null), symbolSize: short ? 9 : 5, itemStyle: { color: t.accent }, yAxisIndex: 0 }] : []),
     ],
   });
 }
@@ -1031,7 +1035,7 @@ route("forma", async (view) => {
   const st = trainingStatus(snap), [tl, tc] = tsbLabel(last.tsb);
   view.innerHTML = `
     <div class="page-head"><div><h1>Forma y carga</h1><div class="sub">Modelo de carga crónica (42 días), aguda (7 días) y balance</div></div>
-      <div class="seg" id="range">${[90, 180, 365, 730].map((n) => `<button data-n="${n}" class="${n === fitDays ? "on" : ""}">${n < 365 ? n + " días" : n / 365 + (n === 365 ? " año" : " años")}</button>`).join("")}</div></div>
+      <div class="seg" id="range">${[[7, "7 días"], [30, "30 días"], [90, "90 días"], [180, "6 meses"], [365, "1 año"], [730, "2 años"]].map(([n, l]) => `<button data-n="${n}" class="${n === fitDays ? "on" : ""}">${l}</button>`).join("")}</div></div>
     <div class="grid">
       <div class="card"><h3>Fitness (CTL)</h3><div class="big num">${last.ctl != null ? nf0.format(last.ctl) : "–"}</div><div class="muted">Carga media de las últimas 6 semanas</div></div>
       <div class="card"><h3>Fatiga (ATL)</h3><div class="big num">${last.atl != null ? nf0.format(last.atl) : "–"}</div><div class="muted">Carga media de la última semana</div></div>
